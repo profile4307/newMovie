@@ -97,6 +97,7 @@ export const api = {
     }) => request<{ data: Video }>('/api/videos', { method: 'POST', body: JSON.stringify(body) }),
     like: (id: string) =>
       request<{ liked: boolean }>(`/api/videos/${id}/like`, { method: 'POST' }),
+    mine: () => request<{ data: (Video & { status: string })[] }>('/api/videos/mine'),
   },
   channels: {
     get: (id: string) => request<{ data: Channel }>(`/api/channels/${id}`),

@@ -189,6 +189,23 @@ app.get('/:id/related', async (c) => {
   return c.json({ data: withChannels })
 })
 
+// ─── 내 영상 목록 (processing 포함) ─────────────────────────────────────────
+app.get('/mine', requireAuth, async (c) => {
+  const userId = c.get('userId')
+  const db = createSupabaseClient(c.env)
+
+  const { data: channels } = await db.query<{ id: string }[]>(
+    `/channels?select=id&owner_id=eq.${userId}&limit=1`
+  )
+  if (!channels || channels.length === 0) return c.json({ data: [] })
+
+  const { data, error } = await db.query<unknown[]>(
+    `/videos?select=id,title,description,thumbnail_url,stream_uid,duration,view_count,like_count,status,category,tags,created_at&channel_id=eq.${channels[0]!.id}&order=created_at.desc`
+  )
+  if (error) return c.json({ error }, 500)
+  return c.json({ data })
+})
+
 // ─── 동영상 등록 (메타데이터) ────────────────────────────────────────────────
 app.post(
   '/',
@@ -222,7 +239,7 @@ app.post(
       body: JSON.stringify({
         ...body,
         channel_id: channels[0]!.id,
-        status: 'published',
+        status: 'processing',
         view_count: 0,
         like_count: 0,
       }),

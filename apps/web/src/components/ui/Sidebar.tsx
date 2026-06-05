@@ -38,7 +38,7 @@ export function Sidebar() {
               href={href}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
                 active
-                  ? 'bg-sky-100 text-sky-700'
+                  ? 'bg-sky-50 text-sky-600'
                   : 'text-slate-600 hover:bg-sky-50 hover:text-sky-700'
               }`}
             >

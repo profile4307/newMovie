@@ -5,91 +5,94 @@ import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
 import { supabase } from '@/lib/supabase'
 
-type UploadState = 'idle' | 'uploading' | 'processing' | 'saving' | 'done' | 'error'
+type UploadState = 'ready' | 'uploading' | 'saving' | 'done' | 'error'
+
+const CATEGORIES = ['게임', '음악', '교육', '엔터테인먼트', '뉴스', '스포츠', '기술', '여행', '요리', '기타']
 
 export function UploadForm() {
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
-  const [state, setState] = useState<UploadState>('idle')
+
+  const [state, setState] = useState<UploadState>('ready')
   const [progress, setProgress] = useState(0)
-  const [streamUid, setStreamUid] = useState('')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [category, setCategory] = useState('')
   const [error, setError] = useState('')
 
-  // 로그인 후 채널이 없으면 자동 생성
+  // 채널 자동 생성 (Google 로그인 사용자)
   useEffect(() => {
     async function ensureChannel() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) return
-
+      const name = (session.user.user_metadata?.full_name ?? session.user.user_metadata?.name ?? session.user.email ?? '내 채널') as string
       try {
-        await api.auth.me()
-      } catch {
-        // users 테이블에 없으면 생성
-        const name = (session.user.user_metadata?.full_name
-          ?? session.user.user_metadata?.name
-          ?? session.user.email
-          ?? '사용자') as string
-        const username = name.replace(/\s+/g, '_').slice(0, 30)
-        await api.auth.createProfile(username).catch(() => null)
-      }
-
-      // 채널 없으면 자동 생성
+        await api.auth.createProfile(name.replace(/\s+/g, '_').slice(0, 30))
+      } catch { /* 이미 있으면 무시 */ }
       try {
-        await api.channels.create({
-          name: (session.user.user_metadata?.full_name
-            ?? session.user.user_metadata?.name
-            ?? session.user.email
-            ?? '내 채널') as string,
-          description: '',
-        })
-      } catch {
-        // 이미 있으면 무시
-      }
+        await api.channels.create({ name, description: '' })
+      } catch { /* 이미 있으면 무시 */ }
     }
     ensureChannel()
   }, [])
 
-  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    try {
-      setState('uploading')
-      setProgress(0)
-      setError('')
-
-      const { uploadUrl, streamUid: uid } = await api.upload.getStreamUrl()
-      setStreamUid(uid)
-
-      await uploadWithProgress(file, uploadUrl, setProgress)
-
-      setState('processing')
-      await waitForProcessing(uid)
-      setState('idle')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '업로드 실패')
-      setState('error')
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null
+    setSelectedFile(file)
+    setError('')
+    // 파일명에서 기본 제목 추출
+    if (file && !title) {
+      const name = file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ')
+      setTitle(name.slice(0, 200))
     }
   }
 
-  async function uploadWithProgress(
-    file: File,
-    uploadUrl: string,
-    onProgress: (pct: number) => void
-  ) {
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!selectedFile || !title) return
+
+    setError('')
+
+    try {
+      // 1. 업로드 URL 발급
+      setState('uploading')
+      setProgress(0)
+      const { uploadUrl, streamUid } = await api.upload.getStreamUrl()
+
+      // 2. Cloudflare Stream으로 파일 업로드 (진행률 표시)
+      await uploadWithProgress(selectedFile, uploadUrl)
+
+      // 3. DB에 저장 (status: processing — 트랜스코딩 완료 전)
+      setState('saving')
+      await api.videos.create({
+        title,
+        description,
+        stream_uid: streamUid,
+        category: category || undefined,
+      })
+
+      // 4. 완료 → 홈으로 이동
+      setState('done')
+      router.push('/my-videos')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '업로드 중 오류가 발생했습니다'
+      setError(msg)
+      setState('ready')
+    }
+  }
+
+  async function uploadWithProgress(file: File, uploadUrl: string) {
     return new Promise<void>((resolve, reject) => {
       const xhr = new XMLHttpRequest()
       xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100))
+        if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100))
       })
       xhr.addEventListener('load', () => {
         if (xhr.status >= 200 && xhr.status < 300) resolve()
         else reject(new Error(`업로드 실패 (${xhr.status})`))
       })
-      xhr.addEventListener('error', () => reject(new Error('네트워크 오류')))
+      xhr.addEventListener('error', () => reject(new Error('네트워크 오류가 발생했습니다')))
       xhr.open('POST', uploadUrl)
       const fd = new FormData()
       fd.append('file', file)
@@ -97,156 +100,150 @@ export function UploadForm() {
     })
   }
 
-  async function waitForProcessing(uid: string) {
-    for (let i = 0; i < 60; i++) {
-      await new Promise((r) => setTimeout(r, 5000))
-      const status = await api.upload.getStatus(uid)
-      if (status.state === 'ready') return status
-      if (status.state === 'error') throw new Error('트랜스코딩 실패')
-    }
-    throw new Error('처리 시간 초과')
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!streamUid || !title) return
-
-    try {
-      setState('saving')
-      const status = await api.upload.getStatus(streamUid)
-      await api.videos.create({
-        title,
-        description,
-        stream_uid: streamUid,
-        thumbnail_url: status.thumbnail || undefined,
-        duration: status.duration ? Math.floor(status.duration) : undefined,
-        category: category || undefined,
-      })
-      setState('done')
-      router.push('/')
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '저장 실패'
-      setError(msg)
-      setState('error')
-    }
-  }
-
-  const CATEGORIES = ['게임', '음악', '교육', '엔터테인먼트', '뉴스', '스포츠', '기술', '여행', '요리', '기타']
+  const isSubmitting = state === 'uploading' || state === 'saving'
+  const canSubmit = !!selectedFile && !!title && !isSubmitting
 
   return (
-    <div className="max-w-2xl mx-auto p-6">
-      <h1 className="text-2xl font-bold text-white mb-8">동영상 업로드</h1>
+    <div className="max-w-2xl mx-auto px-4 py-8">
+      <h1 className="text-2xl font-bold text-slate-800 mb-8">동영상 업로드</h1>
 
-      {/* 파일 선택 영역 */}
-      {!streamUid && state !== 'uploading' && state !== 'processing' && (
-        <div
-          className="border-2 border-dashed border-gray-600 rounded-xl p-12 text-center cursor-pointer hover:border-blue-500 transition-colors"
-          onClick={() => fileRef.current?.click()}
-        >
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {/* 파일 선택 */}
+        <div>
           <input
             ref={fileRef}
             type="file"
             accept="video/*"
             className="hidden"
-            onChange={handleFileSelect}
+            onChange={handleFileChange}
+            disabled={isSubmitting}
           />
-          <svg className="w-16 h-16 text-gray-500 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-          </svg>
-          <p className="text-gray-400">동영상 파일을 클릭하여 선택</p>
-          <p className="text-gray-600 text-sm mt-2">MP4, MOV, AVI 등 지원</p>
-        </div>
-      )}
 
-      {/* 업로드 진행률 */}
-      {state === 'uploading' && (
-        <div className="mt-4">
-          <div className="flex justify-between text-sm text-gray-400 mb-2">
-            <span>업로드 중...</span>
-            <span>{progress}%</span>
-          </div>
-          <div className="w-full bg-gray-700 rounded-full h-2">
-            <div className="bg-blue-500 h-2 rounded-full transition-all" style={{ width: `${progress}%` }} />
-          </div>
-        </div>
-      )}
-
-      {state === 'processing' && (
-        <div className="mt-8 text-center text-gray-400">
-          <div className="inline-block w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4" />
-          <p className="text-white font-medium">트랜스코딩 처리 중...</p>
-          <p className="text-sm mt-1">완료까지 수 분이 걸릴 수 있습니다</p>
-        </div>
-      )}
-
-      {/* 메타데이터 입력 폼 */}
-      {streamUid && state === 'idle' && (
-        <form onSubmit={handleSubmit} className="space-y-6 mt-6">
-          <div className="p-3 bg-green-900/30 border border-green-700 rounded-lg text-green-400 text-sm">
-            ✅ 업로드 완료 — 아래 정보를 입력하고 등록하세요
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">제목 *</label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              required
-              maxLength={200}
-              className="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500"
-              placeholder="동영상 제목을 입력하세요"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">설명</label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={4}
-              maxLength={5000}
-              className="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 resize-none"
-              placeholder="동영상에 대한 설명을 입력하세요"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">카테고리</label>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500"
+          {selectedFile ? (
+            <div className="flex items-center gap-4 bg-sky-50 border border-sky-200 rounded-xl p-4">
+              <div className="w-10 h-10 bg-sky-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-sky-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-slate-800 truncate">{selectedFile.name}</p>
+                <p className="text-sm text-slate-500">{(selectedFile.size / 1024 / 1024).toFixed(1)} MB</p>
+              </div>
+              {!isSubmitting && (
+                <button
+                  type="button"
+                  onClick={() => { setSelectedFile(null); if (fileRef.current) fileRef.current.value = '' }}
+                  className="text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="w-full border-2 border-dashed border-sky-300 hover:border-sky-400 rounded-xl p-12 text-center transition-colors group"
             >
-              <option value="">카테고리 선택</option>
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-          </div>
-
-          <button
-            type="submit"
-            disabled={!title}
-            className="w-full bg-sky-600 hover:bg-sky-700 disabled:bg-sky-200 disabled:text-sky-400 text-white font-medium py-3 rounded-lg transition-colors"
-          >
-            업로드 완료
-          </button>
-        </form>
-      )}
-
-      {error && (
-        <div className="mt-4 p-4 bg-red-900/50 border border-red-700 rounded-lg text-red-400 text-sm">
-          <p className="font-medium mb-1">오류 발생</p>
-          <p>{error}</p>
-          <button
-            onClick={() => { setError(''); setState('idle'); setStreamUid('') }}
-            className="mt-3 text-xs underline hover:text-red-300"
-          >
-            다시 시도
-          </button>
+              <svg className="w-14 h-14 text-sky-300 group-hover:text-sky-400 mx-auto mb-4 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              <p className="text-slate-600 font-medium">클릭하여 영상 파일 선택</p>
+              <p className="text-slate-400 text-sm mt-1">MP4, MOV, AVI 등 지원</p>
+            </button>
+          )}
         </div>
-      )}
+
+        {/* 제목 */}
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-2">제목 *</label>
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            required
+            maxLength={200}
+            disabled={isSubmitting}
+            placeholder="동영상 제목을 입력하세요"
+            className="w-full bg-white border border-sky-200 rounded-xl px-4 py-3 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-sky-400 transition-colors disabled:bg-sky-50"
+          />
+        </div>
+
+        {/* 설명 */}
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-2">설명</label>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={4}
+            maxLength={5000}
+            disabled={isSubmitting}
+            placeholder="동영상에 대한 설명을 입력하세요"
+            className="w-full bg-white border border-sky-200 rounded-xl px-4 py-3 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-sky-400 transition-colors resize-none disabled:bg-sky-50"
+          />
+        </div>
+
+        {/* 카테고리 */}
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-2">카테고리</label>
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            disabled={isSubmitting}
+            className="w-full bg-white border border-sky-200 rounded-xl px-4 py-3 text-slate-900 focus:outline-none focus:border-sky-400 transition-colors disabled:bg-sky-50"
+          >
+            <option value="">카테고리 선택 (선택사항)</option>
+            {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+
+        {/* 업로드 진행률 */}
+        {state === 'uploading' && (
+          <div className="bg-sky-50 rounded-xl p-4">
+            <div className="flex justify-between text-sm text-slate-600 mb-2">
+              <span className="font-medium">업로드 중...</span>
+              <span>{progress}%</span>
+            </div>
+            <div className="w-full bg-sky-200 rounded-full h-2">
+              <div
+                className="bg-sky-500 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <p className="text-xs text-slate-400 mt-2">업로드가 완료되면 자동으로 처리됩니다</p>
+          </div>
+        )}
+
+        {state === 'saving' && (
+          <div className="bg-sky-50 rounded-xl p-4 flex items-center gap-3">
+            <div className="w-5 h-5 border-2 border-sky-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            <p className="text-sm text-slate-600">DB 저장 중...</p>
+          </div>
+        )}
+
+        {/* 오류 */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-600 text-sm">
+            {error}
+          </div>
+        )}
+
+        {/* 제출 버튼 */}
+        <button
+          type="submit"
+          disabled={!canSubmit}
+          className="w-full bg-sky-500 hover:bg-sky-600 disabled:bg-sky-200 disabled:text-sky-400 text-white font-semibold py-3.5 rounded-xl transition-colors"
+        >
+          {isSubmitting ? '처리 중...' : '업로드 완료'}
+        </button>
+
+        {!selectedFile && (
+          <p className="text-center text-sm text-slate-400">영상 파일을 먼저 선택하세요</p>
+        )}
+      </form>
     </div>
   )
 }

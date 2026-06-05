@@ -46,7 +46,7 @@ export function Header() {
   const displayName = (user?.user_metadata?.full_name ?? user?.user_metadata?.name ?? user?.email ?? '') as string
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 h-14 bg-sky-600 text-white flex items-center px-4 gap-4 shadow-md">
+    <header className="fixed top-0 left-0 right-0 z-50 h-14 bg-sky-400 text-white flex items-center px-4 gap-4 shadow-sm">
       {/* 로고 */}
       <Link href="/" className="flex items-center gap-2 flex-shrink-0 w-56">
         <div className="w-8 h-8 bg-white rounded flex items-center justify-center">
@@ -64,11 +64,11 @@ export function Header() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="검색 (띄어쓰기로 여러 단어)"
-          className="flex-1 bg-sky-500/60 border border-sky-400 rounded-l-full px-5 py-2 text-sm text-white placeholder-sky-200 focus:outline-none focus:bg-white focus:text-slate-900 focus:placeholder-slate-400 transition-colors"
+          className="flex-1 bg-sky-300/60 border border-sky-200 rounded-l-full px-5 py-2 text-sm text-white placeholder-sky-100 focus:outline-none focus:bg-white focus:text-slate-900 focus:placeholder-slate-400 transition-colors"
         />
         <button
           type="submit"
-          className="bg-sky-500/60 hover:bg-sky-400 border border-l-0 border-sky-400 rounded-r-full px-5 py-2 transition-colors"
+          className="bg-sky-300/60 hover:bg-sky-300 border border-l-0 border-sky-200 rounded-r-full px-5 py-2 transition-colors"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -82,7 +82,7 @@ export function Header() {
           <>
             <Link
               href="/upload"
-              className="flex items-center gap-2 bg-white/20 hover:bg-white/30 text-sm font-medium px-4 py-2 rounded-full transition-colors"
+              className="flex items-center gap-2 bg-white/25 hover:bg-white/40 text-sm font-medium px-4 py-2 rounded-full transition-colors"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />

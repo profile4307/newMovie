@@ -15,7 +15,8 @@ export type Env = {
   CF_STREAM_ACCOUNT_ID: string
   CF_STREAM_API_TOKEN: string
   CF_STREAM_CUSTOMER_SUBDOMAIN: string
-  ALLOWED_ORIGINS: string // 쉼표 구분 (예: http://localhost:3000,https://example.com)
+  ALLOWED_ORIGINS: string
+  CF_STREAM_WEBHOOK_SECRET?: string
   // VIEW_COUNTS: KVNamespace
   // VIDEO_BUCKET: R2Bucket
 }

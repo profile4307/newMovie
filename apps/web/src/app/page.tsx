@@ -43,7 +43,7 @@ export default async function HomePage({ searchParams }: Props) {
                 href={categoryHref(cat)}
                 className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
                   activeCategory === cat
-                    ? 'bg-sky-600 text-white'
+                    ? 'bg-sky-400 text-white'
                     : 'bg-white text-slate-600 border border-sky-200 hover:bg-sky-50 hover:text-sky-700'
                 }`}
               >
