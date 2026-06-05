@@ -98,6 +98,14 @@ export const api = {
     like: (id: string) =>
       request<{ liked: boolean }>(`/api/videos/${id}/like`, { method: 'POST' }),
     mine: () => request<{ data: (Video & { status: string })[] }>('/api/videos/mine'),
+    update: (id: string, body: {
+      title?: string
+      description?: string
+      category?: string
+      tags?: string[]
+      status?: 'published' | 'private' | 'unlisted'
+    }) => request<{ data: Video }>(`/api/videos/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+    delete: (id: string) => request<{ success: boolean }>(`/api/videos/${id}`, { method: 'DELETE' }),
   },
   channels: {
     get: (id: string) => request<{ data: Channel }>(`/api/channels/${id}`),

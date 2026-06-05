@@ -148,6 +148,23 @@ app.get('/subscription-by-channel', requireAuth, async (c) => {
   return c.json({ data: groups })
 })
 
+// ─── 내 영상 목록 (processing 포함) ─────────────────────────────────────────
+app.get('/mine', requireAuth, async (c) => {
+  const userId = c.get('userId')
+  const db = createSupabaseClient(c.env)
+
+  const { data: channels } = await db.query<{ id: string }[]>(
+    `/channels?select=id&owner_id=eq.${userId}&limit=1`
+  )
+  if (!channels || channels.length === 0) return c.json({ data: [] })
+
+  const { data, error } = await db.query<unknown[]>(
+    `/videos?select=id,title,description,thumbnail_url,stream_uid,duration,view_count,like_count,status,category,tags,created_at&channel_id=eq.${channels[0]!.id}&order=created_at.desc`
+  )
+  if (error) return c.json({ error }, 500)
+  return c.json({ data })
+})
+
 // ─── 동영상 상세 ─────────────────────────────────────────────────────────────
 app.get('/:id', async (c) => {
   const id = c.req.param('id')
@@ -187,23 +204,6 @@ app.get('/:id/related', async (c) => {
   if (error) return c.json({ error }, 500)
   const withChannels = await attachChannels(db, data ?? [])
   return c.json({ data: withChannels })
-})
-
-// ─── 내 영상 목록 (processing 포함) ─────────────────────────────────────────
-app.get('/mine', requireAuth, async (c) => {
-  const userId = c.get('userId')
-  const db = createSupabaseClient(c.env)
-
-  const { data: channels } = await db.query<{ id: string }[]>(
-    `/channels?select=id&owner_id=eq.${userId}&limit=1`
-  )
-  if (!channels || channels.length === 0) return c.json({ data: [] })
-
-  const { data, error } = await db.query<unknown[]>(
-    `/videos?select=id,title,description,thumbnail_url,stream_uid,duration,view_count,like_count,status,category,tags,created_at&channel_id=eq.${channels[0]!.id}&order=created_at.desc`
-  )
-  if (error) return c.json({ error }, 500)
-  return c.json({ data })
 })
 
 // ─── 동영상 등록 (메타데이터) ────────────────────────────────────────────────
@@ -288,6 +288,38 @@ app.put(
     return c.json({ data: data?.[0] })
   }
 )
+
+// ─── 동영상 삭제 ─────────────────────────────────────────────────────────────
+app.delete('/:id', requireAuth, async (c) => {
+  const id = c.req.param('id')
+  if (!isUUID(id)) return c.json({ error: 'Invalid ID' }, 400)
+
+  const userId = c.get('userId')
+  const db = createSupabaseClient(c.env)
+
+  // 소유권 확인 + stream_uid 조회
+  const { data: existing } = await db.query<{ id: string; stream_uid: string; channel: { owner_id: string } }[]>(
+    `/videos?select=id,stream_uid,channel:channels(owner_id)&id=eq.${id}&limit=1`
+  )
+  if (!existing || existing.length === 0) return c.json({ error: 'Not found' }, 404)
+  if (existing[0]!.channel.owner_id !== userId) return c.json({ error: 'Forbidden' }, 403)
+
+  const streamUid = existing[0]!.stream_uid
+
+  // DB에서 삭제 (cascade로 likes, comments 등 자동 삭제)
+  const { error } = await db.query(`/videos?id=eq.${id}`, { method: 'DELETE' })
+  if (error) return c.json({ error }, 500)
+
+  // Cloudflare Stream에서도 삭제 (비동기 — 실패해도 무관)
+  c.executionCtx.waitUntil(
+    fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_STREAM_ACCOUNT_ID}/stream/${streamUid}`,
+      { method: 'DELETE', headers: { Authorization: `Bearer ${c.env.CF_STREAM_API_TOKEN}` } }
+    )
+  )
+
+  return c.json({ success: true })
+})
 
 // ─── 좋아요 토글 ─────────────────────────────────────────────────────────────
 app.post('/:id/like', requireAuth, async (c) => {
