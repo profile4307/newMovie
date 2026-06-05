@@ -76,14 +76,21 @@ create index if not exists videos_channel_id_idx on videos(channel_id);
 create index if not exists videos_status_created_at_idx on videos(status, created_at desc);
 create index if not exists videos_category_idx on videos(category) where status = 'published';
 
--- title + description + tags 통합 FTS 저장 컬럼 (generated column으로 IMMUTABLE 문제 우회)
+-- array_to_string은 STABLE이라 generated column / 인덱스 표현식에 사용 불가
+-- IMMUTABLE 래퍼를 먼저 만들어 우회
+create or replace function tags_to_text(tags text[])
+returns text immutable parallel safe language sql as $$
+  select coalesce(array_to_string(tags, ' '), '')
+$$;
+
+-- title + description + tags 통합 FTS 저장 컬럼
 alter table videos
   add column if not exists fts tsvector
   generated always as (
     to_tsvector('simple',
       coalesce(title, '') || ' ' ||
       coalesce(description, '') || ' ' ||
-      array_to_string(tags, ' ')
+      tags_to_text(tags)
     )
   ) stored;
 
