@@ -6,6 +6,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { api } from '@/lib/api'
+import { ToastContainer, useToast } from '@/components/ui/Toast'
 
 type MyVideo = {
   id: string
@@ -155,10 +156,12 @@ function DeleteModal({
   video,
   onClose,
   onDeleted,
+  onError,
 }: {
   video: MyVideo
   onClose: () => void
   onDeleted: () => void
+  onError: (msg: string) => void
 }) {
   const [deleting, setDeleting] = useState(false)
 
@@ -168,7 +171,7 @@ function DeleteModal({
       await api.videos.delete(video.id)
       onDeleted()
     } catch {
-      alert('삭제 중 오류가 발생했습니다')
+      onError('삭제 중 오류가 발생했습니다')
       setDeleting(false)
     }
   }
@@ -213,9 +216,11 @@ function DeleteModal({
 function StatusDropdown({
   video,
   onChanged,
+  onToast,
 }: {
   video: MyVideo
   onChanged: (status: StatusType) => void
+  onToast: (msg: string, type: 'success' | 'error') => void
 }) {
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -234,8 +239,10 @@ function StatusDropdown({
     try {
       await api.videos.update(video.id, { status })
       onChanged(status)
+      const label = OPTIONS.find((o) => o.value === status)?.label ?? status
+      onToast(`공개 설정을 "${label}"로 변경했습니다`, 'success')
     } catch {
-      alert('공개 설정 변경 실패')
+      onToast('공개 설정 변경에 실패했습니다', 'error')
     } finally {
       setSaving(false)
     }
@@ -289,6 +296,7 @@ function StatusDropdown({
 // ── 메인 페이지 ─────────────────────────────────────────────────────────────
 export default function MyVideosPage() {
   const router = useRouter()
+  const { toasts, show: showToast, remove: removeToast } = useToast()
   const [videos, setVideos] = useState<MyVideo[]>([])
   const [loading, setLoading] = useState(true)
   const [editTarget, setEditTarget] = useState<MyVideo | null>(null)
@@ -320,11 +328,13 @@ export default function MyVideosPage() {
       const status = await api.upload.getStatus(video.stream_uid)
       if (status.state === 'ready') {
         await loadVideos()
+        showToast('트랜스코딩이 완료되었습니다! 영상이 공개되었습니다.', 'success')
       } else {
-        alert(`트랜스코딩 진행중 (${status.pctComplete ?? '?'}% 완료)\n잠시 후 다시 확인해보세요.`)
+        const pct = status.pctComplete ? `${status.pctComplete}% 완료` : '진행중'
+        showToast(`트랜스코딩 처리중입니다 (${pct}). 잠시 후 다시 확인해보세요.`, 'warning')
       }
     } catch {
-      alert('상태 확인 중 오류가 발생했습니다')
+      showToast('상태 확인 중 오류가 발생했습니다', 'error')
     } finally {
       setCheckingId(null)
     }
@@ -340,12 +350,18 @@ export default function MyVideosPage() {
 
   return (
     <div className="min-h-screen bg-sky-50">
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
+
       {/* 수정 모달 */}
       {editTarget && (
         <EditModal
           video={editTarget}
           onClose={() => setEditTarget(null)}
-          onSaved={(updated) => { updateVideo(editTarget.id, updated); setEditTarget(null) }}
+          onSaved={(updated) => {
+            updateVideo(editTarget.id, updated)
+            setEditTarget(null)
+            showToast('동영상 정보가 수정되었습니다', 'success')
+          }}
         />
       )}
 
@@ -357,7 +373,9 @@ export default function MyVideosPage() {
           onDeleted={() => {
             setVideos((prev) => prev.filter((v) => v.id !== deleteTarget.id))
             setDeleteTarget(null)
+            showToast('동영상이 삭제되었습니다', 'info')
           }}
+          onError={(msg) => showToast(msg, 'error')}
         />
       )}
 
@@ -451,6 +469,7 @@ export default function MyVideosPage() {
                         <StatusDropdown
                           video={video}
                           onChanged={(status) => updateVideo(video.id, { status })}
+                          onToast={(msg, type) => showToast(msg, type)}
                         />
                       )}
                     </div>
