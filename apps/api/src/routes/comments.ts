@@ -9,10 +9,22 @@ type Variables = AuthVariables
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>()
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function isUUID(v: string) {
+  return UUID_RE.test(v)
+}
+
 // 댓글 목록
 app.get(
   '/',
-  zValidator('query', z.object({ video_id: z.string(), page: z.coerce.number().default(1) })),
+  zValidator(
+    'query',
+    z.object({
+      video_id: z.string().uuid(),
+      page: z.coerce.number().int().min(1).default(1),
+    })
+  ),
   async (c) => {
     const { video_id, page } = c.req.valid('query')
     const limit = 20
@@ -58,11 +70,13 @@ app.post(
 // 댓글 삭제
 app.delete('/:id', requireAuth, async (c) => {
   const id = c.req.param('id')
+  if (!isUUID(id)) return c.json({ error: 'Invalid ID' }, 400)
+
   const userId = c.get('userId')
   const db = createSupabaseClient(c.env)
 
   const { data: existing } = await db.query<{ user_id: string }[]>(
-    `/comments?id=eq.${id}&limit=1`
+    `/comments?select=user_id&id=eq.${id}&limit=1`
   )
   if (!existing || existing.length === 0) return c.json({ error: 'Not found' }, 404)
   if (existing[0]!.user_id !== userId) return c.json({ error: 'Forbidden' }, 403)

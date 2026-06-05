@@ -5,19 +5,20 @@ export type SupabaseClient = ReturnType<typeof createSupabaseClient>
 export function createSupabaseClient(env: Env) {
   const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = env
 
+  const baseHeaders = {
+    'Content-Type': 'application/json',
+    apikey: SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+    Prefer: 'return=representation',
+  }
+
   async function query<T>(
     path: string,
     options: RequestInit = {}
   ): Promise<{ data: T | null; error: string | null }> {
     const res = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
       ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: SUPABASE_SERVICE_ROLE_KEY,
-        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-        Prefer: 'return=representation',
-        ...options.headers,
-      },
+      headers: { ...baseHeaders, ...options.headers },
     })
 
     if (!res.ok) {
@@ -29,7 +30,27 @@ export function createSupabaseClient(env: Env) {
     return { data, error: null }
   }
 
-  return { query }
+  async function rpc<T>(
+    fnName: string,
+    params: Record<string, unknown> = {}
+  ): Promise<{ data: T | null; error: string | null }> {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fnName}`, {
+      method: 'POST',
+      headers: baseHeaders,
+      body: JSON.stringify(params),
+    })
+
+    if (!res.ok) {
+      const err = await res.text()
+      return { data: null, error: err }
+    }
+
+    const text = await res.text()
+    const data = text ? (JSON.parse(text) as T) : (null as T)
+    return { data, error: null }
+  }
+
+  return { query, rpc }
 }
 
 export function createAnonClient(env: Env) {

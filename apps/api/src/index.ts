@@ -15,6 +15,7 @@ export type Env = {
   CF_STREAM_ACCOUNT_ID: string
   CF_STREAM_API_TOKEN: string
   CF_STREAM_CUSTOMER_SUBDOMAIN: string
+  ALLOWED_ORIGINS: string // 쉼표 구분 (예: http://localhost:3000,https://example.com)
   // VIEW_COUNTS: KVNamespace
   // VIDEO_BUCKET: R2Bucket
 }
@@ -22,15 +23,15 @@ export type Env = {
 const app = new Hono<{ Bindings: Env }>()
 
 app.use('*', logger())
-app.use(
-  '/api/*',
-  cors({
-    origin: ['http://localhost:3000', 'https://newmovie.pages.dev'],
+app.use('/api/*', async (c, next) => {
+  const allowedOrigins = (c.env.ALLOWED_ORIGINS ?? 'http://localhost:3000').split(',').map((o) => o.trim())
+  return cors({
+    origin: allowedOrigins,
     allowHeaders: ['Content-Type', 'Authorization'],
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true,
-  })
-)
+  })(c, next)
+})
 
 app.get('/', (c) => c.json({ status: 'ok', service: 'newmovie-api' }))
 

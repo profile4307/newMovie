@@ -6,6 +6,9 @@ type Variables = AuthVariables
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>()
 
+// Cloudflare Stream UID 형식 (32자 hex 또는 UUID 유사 형식)
+const STREAM_UID_RE = /^[a-f0-9]{32}$|^[a-f0-9-]{36}$/i
+
 // Cloudflare Stream 직접 업로드 URL 발급
 app.post('/stream-url', requireAuth, async (c) => {
   const { CF_STREAM_ACCOUNT_ID, CF_STREAM_API_TOKEN } = c.env
@@ -19,8 +22,8 @@ app.post('/stream-url', requireAuth, async (c) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        maxDurationSeconds: 3600, // 최대 1시간
-        expiry: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30분 유효
+        maxDurationSeconds: 3600,
+        expiry: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
         meta: { userId: c.get('userId') },
         requireSignedURLs: false,
       }),
@@ -42,9 +45,14 @@ app.post('/stream-url', requireAuth, async (c) => {
   })
 })
 
-// 업로드 완료 후 상태 확인
+// 업로드 완료 후 트랜스코딩 상태 확인
 app.get('/stream-status/:uid', requireAuth, async (c) => {
   const uid = c.req.param('uid')
+
+  if (!STREAM_UID_RE.test(uid)) {
+    return c.json({ error: 'Invalid stream UID' }, 400)
+  }
+
   const { CF_STREAM_ACCOUNT_ID, CF_STREAM_API_TOKEN } = c.env
 
   const res = await fetch(

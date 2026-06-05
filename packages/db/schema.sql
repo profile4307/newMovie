@@ -60,9 +60,9 @@ create table if not exists videos (
   channel_id      uuid not null references channels(id) on delete cascade,
   title           text not null,
   description     text not null default '',
-  stream_uid      text not null unique,  -- Cloudflare Stream UID
+  stream_uid      text not null unique,
   thumbnail_url   text,
-  duration        integer,              -- 초 단위
+  duration        integer,
   status          video_status not null default 'processing',
   category        text,
   tags            text[] not null default '{}',
@@ -75,7 +75,16 @@ create table if not exists videos (
 create index if not exists videos_channel_id_idx on videos(channel_id);
 create index if not exists videos_status_created_at_idx on videos(status, created_at desc);
 create index if not exists videos_category_idx on videos(category) where status = 'published';
-create index if not exists videos_title_fts_idx on videos using gin(to_tsvector('simple', title));
+
+-- title + description + tags 통합 FTS 인덱스
+create index if not exists videos_fts_idx on videos
+  using gin(
+    to_tsvector('simple',
+      coalesce(title, '') || ' ' ||
+      coalesce(description, '') || ' ' ||
+      array_to_string(tags, ' ')
+    )
+  );
 
 alter table videos enable row level security;
 
@@ -123,6 +132,19 @@ create policy "Users can manage own likes"
 
 create policy "Likes are viewable by everyone"
   on likes for select using (true);
+
+-- =============================================
+-- 일별 좋아요 집계 (추천 점수 계산용)
+-- 총점 = Σ count_i × (10 - i), i=0은 오늘, i=9는 9일 전
+-- =============================================
+create table if not exists video_daily_likes (
+  video_id  uuid not null references videos(id) on delete cascade,
+  date      date not null default current_date,
+  count     integer not null default 0,
+  primary key (video_id, date)
+);
+
+create index if not exists video_daily_likes_date_idx on video_daily_likes(date);
 
 -- =============================================
 -- 구독
@@ -186,3 +208,205 @@ alter table reports enable row level security;
 
 create policy "Users can submit reports"
   on reports for insert with check (auth.uid() = reporter_id);
+
+-- =============================================
+-- RPC 함수들
+-- =============================================
+
+-- 조회수 원자적 증가
+create or replace function increment_view_count(p_video_id uuid)
+returns void as $$
+  update videos set view_count = view_count + 1 where id = p_video_id;
+$$ language sql security definer;
+
+-- 좋아요 토글 (race condition 방지, video_daily_likes 동기화)
+-- returns: true=좋아요됨, false=취소됨
+create or replace function toggle_like(p_user_id uuid, p_video_id uuid)
+returns boolean as $$
+declare
+  deleted int;
+begin
+  delete from likes where user_id = p_user_id and video_id = p_video_id;
+  get diagnostics deleted = row_count;
+  if deleted > 0 then
+    update videos
+      set like_count = greatest(0, like_count - 1)
+      where id = p_video_id;
+    update video_daily_likes
+      set count = greatest(0, count - 1)
+      where video_id = p_video_id and date = current_date;
+    return false;
+  else
+    insert into likes(user_id, video_id) values(p_user_id, p_video_id)
+      on conflict do nothing;
+    update videos set like_count = like_count + 1 where id = p_video_id;
+    insert into video_daily_likes(video_id, date, count)
+      values(p_video_id, current_date, 1)
+      on conflict(video_id, date)
+      do update set count = video_daily_likes.count + 1;
+    return true;
+  end if;
+end;
+$$ language plpgsql security definer;
+
+-- 구독 토글 (race condition 방지)
+-- returns: true=구독됨, false=취소됨
+create or replace function toggle_subscription(p_user_id uuid, p_channel_id uuid)
+returns boolean as $$
+declare
+  deleted int;
+begin
+  delete from subscriptions where user_id = p_user_id and channel_id = p_channel_id;
+  get diagnostics deleted = row_count;
+  if deleted > 0 then
+    update channels
+      set subscriber_count = greatest(0, subscriber_count - 1)
+      where id = p_channel_id;
+    return false;
+  else
+    insert into subscriptions(user_id, channel_id) values(p_user_id, p_channel_id)
+      on conflict do nothing;
+    update channels set subscriber_count = subscriber_count + 1 where id = p_channel_id;
+    return true;
+  end if;
+end;
+$$ language plpgsql security definer;
+
+-- 추천 피드: 시간 가중 좋아요 점수 기반 정렬
+-- 총점 = Σ daily_count × (10 - 경과일), 오늘=×10, 9일전=×1
+create or replace function get_trending_videos(p_limit int, p_offset int)
+returns table(
+  id uuid, title text, description text, thumbnail_url text,
+  stream_uid text, duration int, view_count bigint, like_count bigint,
+  category text, tags text[], created_at timestamptz,
+  channel_id uuid, trend_score bigint
+) as $$
+  select
+    v.id, v.title, v.description, v.thumbnail_url,
+    v.stream_uid, v.duration, v.view_count, v.like_count,
+    v.category, v.tags, v.created_at, v.channel_id,
+    coalesce(sum(
+      dl.count * greatest(0, 10 - (current_date - dl.date)::int)
+    ), 0)::bigint as trend_score
+  from videos v
+  left join video_daily_likes dl
+    on dl.video_id = v.id
+    and dl.date between current_date - interval '9 days' and current_date
+  where v.status = 'published'
+  group by v.id
+  order by trend_score desc, v.created_at desc
+  limit p_limit offset p_offset;
+$$ language sql stable security definer;
+
+-- 구독 피드: 구독 채널의 최신 영상 (업로드 시간 역순)
+create or replace function get_subscription_feed(p_user_id uuid, p_limit int, p_offset int)
+returns table(
+  id uuid, title text, description text, thumbnail_url text,
+  stream_uid text, duration int, view_count bigint, like_count bigint,
+  category text, tags text[], created_at timestamptz, channel_id uuid
+) as $$
+  select
+    v.id, v.title, v.description, v.thumbnail_url,
+    v.stream_uid, v.duration, v.view_count, v.like_count,
+    v.category, v.tags, v.created_at, v.channel_id
+  from videos v
+  inner join subscriptions s on s.channel_id = v.channel_id
+  where s.user_id = p_user_id
+    and v.status = 'published'
+  order by v.created_at desc
+  limit p_limit offset p_offset;
+$$ language sql stable security definer;
+
+-- 멀티 키워드 검색 (띄어쓰기로 AND 조건, title+description+tags FTS)
+create or replace function search_videos(p_query text, p_limit int, p_offset int)
+returns table(
+  id uuid, title text, description text, thumbnail_url text,
+  stream_uid text, duration int, view_count bigint, like_count bigint,
+  category text, tags text[], created_at timestamptz, channel_id uuid
+) as $$
+declare
+  tsq tsquery;
+  words text[];
+begin
+  words := array_remove(
+    string_to_array(trim(regexp_replace(p_query, '\s+', ' ', 'g')), ' '),
+    ''
+  );
+  if array_length(words, 1) is null then
+    return;
+  end if;
+  select string_agg(word || ':*', ' & ')
+    into tsq
+    from unnest(words) as word;
+
+  return query
+  select
+    v.id, v.title, v.description, v.thumbnail_url,
+    v.stream_uid, v.duration, v.view_count, v.like_count,
+    v.category, v.tags, v.created_at, v.channel_id
+  from videos v
+  where v.status = 'published'
+    and to_tsvector('simple',
+          coalesce(v.title, '') || ' ' ||
+          coalesce(v.description, '') || ' ' ||
+          array_to_string(v.tags, ' ')
+        ) @@ tsq
+  order by
+    ts_rank(
+      to_tsvector('simple',
+        coalesce(v.title, '') || ' ' ||
+        coalesce(v.description, '') || ' ' ||
+        array_to_string(v.tags, ' ')
+      ),
+      tsq
+    ) desc,
+    v.created_at desc
+  limit p_limit offset p_offset;
+end;
+$$ language plpgsql stable security definer;
+
+-- 태그/카테고리 기반 유사 영상 추천
+create or replace function get_related_videos(p_video_id uuid, p_limit int)
+returns table(
+  id uuid, title text, thumbnail_url text, stream_uid text,
+  duration int, view_count bigint, created_at timestamptz, channel_id uuid
+) as $$
+declare
+  v_tags  text[];
+  v_cat   text;
+  v_tsq   tsquery;
+begin
+  select tags, category into v_tags, v_cat from videos where id = p_video_id;
+
+  if v_tags is not null and array_length(v_tags, 1) > 0 then
+    select string_agg(t || ':*', ' | ')
+      into v_tsq from unnest(v_tags) as t;
+
+    return query
+      select v.id, v.title, v.thumbnail_url, v.stream_uid,
+             v.duration, v.view_count, v.created_at, v.channel_id
+      from videos v
+      where v.status = 'published' and v.id != p_video_id
+        and to_tsvector('simple',
+              coalesce(v.title, '') || ' ' || array_to_string(v.tags, ' ')
+            ) @@ v_tsq
+      order by
+        ts_rank(
+          to_tsvector('simple', coalesce(v.title,'') || ' ' || array_to_string(v.tags,' ')),
+          v_tsq
+        ) desc
+      limit p_limit;
+    return;
+  end if;
+
+  -- 태그 없으면 같은 카테고리 최신 영상
+  return query
+    select v.id, v.title, v.thumbnail_url, v.stream_uid,
+           v.duration, v.view_count, v.created_at, v.channel_id
+    from videos v
+    where v.status = 'published' and v.id != p_video_id
+      and (v_cat is null or v.category = v_cat)
+    order by v.created_at desc
+    limit p_limit;
+end;
+$$ language plpgsql stable security definer;

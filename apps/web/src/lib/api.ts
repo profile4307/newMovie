@@ -39,6 +39,7 @@ export type Video = {
   category: string | null
   tags: string[]
   created_at: string
+  trend_score?: number
   channel: {
     id: string
     name: string
@@ -64,16 +65,25 @@ export type Comment = {
   user: { id: string; username: string; avatar_url: string | null }
 }
 
+export type FeedType = 'trending' | 'subscriptions' | 'latest'
+
 export const api = {
   videos: {
-    list: (params?: { page?: number; category?: string; search?: string }) => {
+    list: (params?: {
+      feed?: FeedType
+      page?: number
+      category?: string
+      search?: string
+    }) => {
       const q = new URLSearchParams()
+      if (params?.feed) q.set('feed', params.feed)
       if (params?.page) q.set('page', String(params.page))
       if (params?.category) q.set('category', params.category)
       if (params?.search) q.set('search', params.search)
-      return request<{ data: Video[] }>(`/api/videos?${q}`)
+      return request<{ data: Video[]; feed: string }>(`/api/videos?${q}`)
     },
     get: (id: string) => request<{ data: Video }>(`/api/videos/${id}`),
+    related: (id: string) => request<{ data: Video[] }>(`/api/videos/${id}/related`),
     create: (body: {
       title: string
       description: string
