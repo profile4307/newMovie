@@ -26,6 +26,47 @@ create policy "Users can update own profile"
 create policy "Users can insert own profile"
   on users for insert with check (auth.uid() = id);
 
+-- auth.users 신규 가입 시 users 테이블에 자동으로 레코드 생성
+-- Google OAuth 등 소셜 로그인도 포함
+create or replace function handle_new_auth_user()
+returns trigger as $$
+begin
+  insert into public.users (id, username, avatar_url)
+  values (
+    new.id,
+    coalesce(
+      new.raw_user_meta_data->>'full_name',
+      new.raw_user_meta_data->>'name',
+      split_part(new.email, '@', 1),
+      substring(new.id::text, 1, 12)
+    ),
+    new.raw_user_meta_data->>'avatar_url'
+  )
+  on conflict (id) do nothing;
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function handle_new_auth_user();
+
+-- 기존에 가입했지만 users 레코드가 없는 사용자 일괄 생성
+insert into public.users (id, username, avatar_url)
+select
+  au.id,
+  coalesce(
+    au.raw_user_meta_data->>'full_name',
+    au.raw_user_meta_data->>'name',
+    split_part(au.email, '@', 1),
+    substring(au.id::text, 1, 12)
+  ),
+  au.raw_user_meta_data->>'avatar_url'
+from auth.users au
+where not exists (select 1 from public.users u where u.id = au.id)
+on conflict (id) do nothing;
+
 -- =============================================
 -- 채널
 -- =============================================

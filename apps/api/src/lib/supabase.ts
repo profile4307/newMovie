@@ -56,16 +56,22 @@ export function createSupabaseClient(env: Env) {
 export function createAnonClient(env: Env) {
   const { SUPABASE_URL, SUPABASE_ANON_KEY } = env
 
-  async function verifyToken(token: string): Promise<{ userId: string | null }> {
+  async function verifyToken(token: string): Promise<{
+    userId: string | null
+    userMeta: Record<string, string> | null
+  }> {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
       headers: {
         apikey: SUPABASE_ANON_KEY,
         Authorization: `Bearer ${token}`,
       },
     })
-    if (!res.ok) return { userId: null }
-    const user = (await res.json()) as { id: string }
-    return { userId: user.id }
+    if (!res.ok) return { userId: null, userMeta: null }
+    const user = (await res.json()) as { id: string; user_metadata?: Record<string, string>; email?: string }
+    return {
+      userId: user.id,
+      userMeta: { ...(user.user_metadata ?? {}), email: user.email ?? '' },
+    }
   }
 
   return { verifyToken }
