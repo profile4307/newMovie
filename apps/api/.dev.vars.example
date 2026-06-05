@@ -3,4 +3,6 @@ SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 CF_STREAM_ACCOUNT_ID=your-cloudflare-account-id
 CF_STREAM_API_TOKEN=your-stream-api-token
-CF_STREAM_CUSTOMER_SUBDOMAIN=customer-subdomain
+CF_STREAM_CUSTOMER_SUBDOMAIN=customer-xxxxxxxxxx
+ALLOWED_ORIGINS=http://localhost:3000
+CF_STREAM_WEBHOOK_SECRET=your-webhook-secret
