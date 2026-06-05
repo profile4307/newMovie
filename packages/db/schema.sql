@@ -76,15 +76,18 @@ create index if not exists videos_channel_id_idx on videos(channel_id);
 create index if not exists videos_status_created_at_idx on videos(status, created_at desc);
 create index if not exists videos_category_idx on videos(category) where status = 'published';
 
--- title + description + tags 통합 FTS 인덱스
-create index if not exists videos_fts_idx on videos
-  using gin(
+-- title + description + tags 통합 FTS 저장 컬럼 (generated column으로 IMMUTABLE 문제 우회)
+alter table videos
+  add column if not exists fts tsvector
+  generated always as (
     to_tsvector('simple',
       coalesce(title, '') || ' ' ||
       coalesce(description, '') || ' ' ||
       array_to_string(tags, ' ')
     )
-  );
+  ) stored;
+
+create index if not exists videos_fts_idx on videos using gin(fts);
 
 alter table videos enable row level security;
 
@@ -346,20 +349,9 @@ begin
     v.category, v.tags, v.created_at, v.channel_id
   from videos v
   where v.status = 'published'
-    and to_tsvector('simple',
-          coalesce(v.title, '') || ' ' ||
-          coalesce(v.description, '') || ' ' ||
-          array_to_string(v.tags, ' ')
-        ) @@ tsq
+    and v.fts @@ tsq
   order by
-    ts_rank(
-      to_tsvector('simple',
-        coalesce(v.title, '') || ' ' ||
-        coalesce(v.description, '') || ' ' ||
-        array_to_string(v.tags, ' ')
-      ),
-      tsq
-    ) desc,
+    ts_rank(v.fts, tsq) desc,
     v.created_at desc
   limit p_limit offset p_offset;
 end;
@@ -387,14 +379,9 @@ begin
              v.duration, v.view_count, v.created_at, v.channel_id
       from videos v
       where v.status = 'published' and v.id != p_video_id
-        and to_tsvector('simple',
-              coalesce(v.title, '') || ' ' || array_to_string(v.tags, ' ')
-            ) @@ v_tsq
+        and v.fts @@ v_tsq
       order by
-        ts_rank(
-          to_tsvector('simple', coalesce(v.title,'') || ' ' || array_to_string(v.tags,' ')),
-          v_tsq
-        ) desc
+        ts_rank(v.fts, v_tsq) desc
       limit p_limit;
     return;
   end if;
