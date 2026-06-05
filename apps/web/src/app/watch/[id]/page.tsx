@@ -1,4 +1,7 @@
-import { notFound } from 'next/navigation'
+'use client'
+
+import { useEffect, useState } from 'react'
+import { useParams, useRouter } from 'next/navigation'
 import Image from 'next/image'
 import Link from 'next/link'
 import { VideoPlayer } from '@/components/video/VideoPlayer'
@@ -6,20 +9,18 @@ import { ShareButton } from '@/components/video/ShareButton'
 import { VideoActions } from '@/components/video/VideoActions'
 import { api, type Video } from '@/lib/api'
 
-type Props = { params: Promise<{ id: string }> }
+const CF_SUBDOMAIN = process.env.NEXT_PUBLIC_CF_STREAM_CUSTOMER_SUBDOMAIN ?? 'customer-subdomain'
 
 function formatCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
   return String(n)
 }
-
 function formatDuration(s: number | null): string {
   if (!s) return ''
-  const m = Math.floor(s / 60); const sec = s % 60
+  const m = Math.floor(s / 60), sec = s % 60
   return `${m}:${String(sec).padStart(2, '0')}`
 }
-
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime()
   const mins = Math.floor(diff / 60000)
@@ -39,7 +40,7 @@ function RelatedCard({ video }: { video: Video }) {
         {video.thumbnail_url ? (
           <Image src={video.thumbnail_url} alt={video.title} fill className="object-cover group-hover:scale-105 transition-transform duration-200" />
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-sky-300">
+          <div className="absolute inset-0 flex items-center justify-center text-sky-200">
             <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
           </div>
         )}
@@ -60,39 +61,69 @@ function RelatedCard({ video }: { video: Video }) {
   )
 }
 
-export default async function WatchPage({ params }: Props) {
-  const { id } = await params
+const STATUS_BADGE: Record<string, { label: string; className: string }> = {
+  private:   { label: '🔒 비공개', className: 'bg-slate-100 text-slate-600 border border-slate-300' },
+  unlisted:  { label: '🔗 일부공개', className: 'bg-blue-50 text-blue-700 border border-blue-200' },
+  processing:{ label: '⏳ 처리중', className: 'bg-amber-50 text-amber-700 border border-amber-200' },
+}
 
-  let video: Video
-  let relatedVideos: Video[] = []
+export default function WatchPage() {
+  const params = useParams<{ id: string }>()
+  const router = useRouter()
+  const [video, setVideo] = useState<Video & { status?: string } | null>(null)
+  const [related, setRelated] = useState<Video[]>([])
+  const [loading, setLoading] = useState(true)
+  const [notFound, setNotFound] = useState(false)
 
-  try {
-    const result = await api.videos.get(id)
-    video = result.data
-  } catch {
-    notFound()
+  useEffect(() => {
+    if (!params.id) return
+
+    api.videos.get(params.id)
+      .then(async (res) => {
+        setVideo(res.data)
+        // 관련 영상 병렬 로드
+        api.videos.related(params.id).then((r) => setRelated(r.data)).catch(() => {})
+      })
+      .catch(() => setNotFound(true))
+      .finally(() => setLoading(false))
+  }, [params.id])
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-sky-50 flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-sky-400 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
   }
 
-  try {
-    const related = await api.videos.related(id)
-    relatedVideos = related.data
-  } catch { /* 무시 */ }
+  if (notFound || !video) {
+    return (
+      <div className="min-h-screen bg-sky-50 flex flex-col items-center justify-center gap-4">
+        <p className="text-4xl">🎬</p>
+        <p className="text-xl font-semibold text-slate-700">영상을 찾을 수 없습니다</p>
+        <p className="text-slate-400 text-sm">비공개이거나 삭제된 영상일 수 있습니다</p>
+        <Link href="/" className="mt-2 bg-sky-500 hover:bg-sky-600 text-white px-5 py-2 rounded-full text-sm font-medium transition-colors">
+          홈으로 돌아가기
+        </Link>
+      </div>
+    )
+  }
 
-  const customerSubdomain = process.env.CF_STREAM_CUSTOMER_SUBDOMAIN ?? 'customer-subdomain'
+  const statusBadge = video.status ? STATUS_BADGE[video.status] : null
 
   return (
     <div className="bg-sky-50 min-h-screen">
       {/* 뒤로가기 */}
       <div className="max-w-screen-2xl mx-auto px-4 pt-4">
-        <Link
-          href="/"
+        <button
+          onClick={() => router.back()}
           className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-sky-600 transition-colors mb-4"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
           뒤로
-        </Link>
+        </button>
       </div>
 
       <div className="max-w-screen-2xl mx-auto px-4 pb-8">
@@ -101,29 +132,35 @@ export default async function WatchPage({ params }: Props) {
           <div className="flex-1 min-w-0">
             <VideoPlayer
               streamUid={video.stream_uid}
-              customerSubdomain={customerSubdomain}
+              customerSubdomain={CF_SUBDOMAIN}
               poster={video.thumbnail_url ?? undefined}
             />
 
             <div className="mt-4 bg-white rounded-2xl p-5 shadow-sm border border-sky-100">
-              <h1 className="text-xl font-bold text-slate-900">{video.title}</h1>
+              {/* 제목 + 상태 배지 */}
+              <div className="flex items-start gap-3 flex-wrap">
+                <h1 className="text-xl font-bold text-slate-900 flex-1">{video.title}</h1>
+                {statusBadge && (
+                  <span className={`flex-shrink-0 text-xs font-medium px-2.5 py-1 rounded-full ${statusBadge.className}`}>
+                    {statusBadge.label}
+                  </span>
+                )}
+              </div>
 
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mt-4">
-                {/* 채널 정보 */}
+                {/* 채널 */}
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-sky-100 overflow-hidden flex-shrink-0">
                     {video.channel.avatar_url && (
                       <Image src={video.channel.avatar_url} alt={video.channel.name} width={40} height={40} />
                     )}
                   </div>
-                  <div>
-                    <Link href={`/channel/${video.channel.id}`} className="font-semibold text-slate-900 hover:text-sky-600 transition-colors">
-                      {video.channel.name}
-                    </Link>
-                  </div>
+                  <Link href={`/channel/${video.channel.id}`} className="font-semibold text-slate-900 hover:text-sky-600 transition-colors">
+                    {video.channel.name}
+                  </Link>
                 </div>
 
-                {/* 액션 버튼 (클라이언트 컴포넌트) */}
+                {/* 액션 */}
                 <div className="flex items-center gap-2">
                   <VideoActions
                     videoId={video.id}
@@ -157,14 +194,14 @@ export default async function WatchPage({ params }: Props) {
             </div>
           </div>
 
-          {/* 사이드바 — 관련 영상 */}
+          {/* 관련 영상 */}
           <aside className="w-full lg:w-80 flex-shrink-0">
             <h2 className="font-bold text-slate-700 mb-3">관련 동영상</h2>
-            {relatedVideos.length === 0 ? (
+            {related.length === 0 ? (
               <p className="text-slate-400 text-sm text-center py-8">관련 동영상이 없습니다</p>
             ) : (
               <div className="flex flex-col gap-3">
-                {relatedVideos.map((v) => <RelatedCard key={v.id} video={v} />)}
+                {related.map((v) => <RelatedCard key={v.id} video={v} />)}
               </div>
             )}
           </aside>

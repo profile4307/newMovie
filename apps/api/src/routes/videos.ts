@@ -171,24 +171,43 @@ app.get('/:id', async (c) => {
   if (!isUUID(id)) return c.json({ error: 'Invalid ID' }, 400)
 
   const db = createSupabaseClient(c.env)
-  const { data, error } = await db.query<
-    {
-      id: string; title: string; description: string; thumbnail_url: string | null
-      stream_uid: string; duration: number | null; view_count: number; like_count: number
-      category: string | null; tags: string[]; created_at: string
-      channel: { id: string; name: string; avatar_url: string | null; subscriber_count: number }
-    }[]
-  >(
-    `/videos?select=id,title,description,thumbnail_url,stream_uid,duration,view_count,like_count,category,tags,created_at,channel:channels(id,name,avatar_url,subscriber_count)&id=eq.${id}&status=eq.published&limit=1`
+
+  type VideoRow = {
+    id: string; title: string; description: string; thumbnail_url: string | null
+    stream_uid: string; duration: number | null; view_count: number; like_count: number
+    category: string | null; tags: string[]; created_at: string; status: string
+    channel: { id: string; name: string; avatar_url: string | null; subscriber_count: number; owner_id: string }
+  }
+
+  const { data, error } = await db.query<VideoRow[]>(
+    `/videos?select=id,title,description,thumbnail_url,stream_uid,duration,view_count,like_count,category,tags,created_at,status,channel:channels(id,name,avatar_url,subscriber_count,owner_id)&id=eq.${id}&limit=1`
   )
 
   if (error) return c.json({ error }, 500)
   if (!data || data.length === 0) return c.json({ error: 'Not found' }, 404)
 
-  // 조회수 비동기 증가 (실패해도 응답에 영향 없음)
-  c.executionCtx.waitUntil(db.rpc('increment_view_count', { p_video_id: id }))
+  const video = data[0]!
 
-  return c.json({ data: data[0] })
+  // 비공개/일부공개/처리중: 소유자만 접근 가능
+  if (video.status !== 'published') {
+    const authHeader = c.req.header('Authorization')
+    let isOwner = false
+    if (authHeader?.startsWith('Bearer ')) {
+      const { createAnonClient } = await import('../lib/supabase')
+      const { userId } = await createAnonClient(c.env).verifyToken(authHeader.slice(7))
+      isOwner = userId === video.channel.owner_id
+    }
+    if (!isOwner) return c.json({ error: 'Not found' }, 404)
+  }
+
+  // 공개 영상만 조회수 증가
+  if (video.status === 'published') {
+    c.executionCtx.waitUntil(db.rpc('increment_view_count', { p_video_id: id }))
+  }
+
+  // owner_id는 응답에서 제외
+  const { channel: { owner_id: _, ...channelPublic }, ...videoPublic } = video
+  return c.json({ data: { ...videoPublic, channel: channelPublic } })
 })
 
 // ─── 유사 영상 추천 ──────────────────────────────────────────────────────────

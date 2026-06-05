@@ -330,7 +330,7 @@ export default function MyVideosPage() {
         await loadVideos()
         showToast('트랜스코딩이 완료되었습니다! 영상이 공개되었습니다.', 'success')
       } else {
-        const pct = status.pctComplete ? `${status.pctComplete}% 완료` : '진행중'
+        const pct = status.pctComplete ? `${Math.floor(Number(status.pctComplete))}% 완료` : '진행중'
         showToast(`트랜스코딩 처리중입니다 (${pct}). 잠시 후 다시 확인해보세요.`, 'warning')
       }
     } catch {
