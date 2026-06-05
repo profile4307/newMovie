@@ -56,13 +56,17 @@ app.get('/stream-status/:uid', requireAuth, async (c) => {
     result: { uid: string; status: { state: string; pctComplete: string }; duration: number; thumbnail: string }
   }
 
-  // 트랜스코딩 완료 시 DB 자동 업데이트
+  // 트랜스코딩 완료 시 target_status로 전환
   if (result.result.status.state === 'ready') {
     const db = createSupabaseClient(c.env)
+    const { data: videos } = await db.query<{ target_status: string }[]>(
+      `/videos?select=target_status&stream_uid=eq.${uid}&limit=1`
+    )
+    const targetStatus = videos?.[0]?.target_status ?? 'published'
     await db.query(`/videos?stream_uid=eq.${uid}`, {
       method: 'PATCH',
       body: JSON.stringify({
-        status: 'published',
+        status: targetStatus,
         duration: result.result.duration ? Math.floor(result.result.duration) : undefined,
         thumbnail_url: result.result.thumbnail || undefined,
       }),
@@ -99,10 +103,14 @@ app.post('/webhook', async (c) => {
 
   if (body.status?.state === 'ready' && body.uid) {
     const db = createSupabaseClient(c.env)
+    const { data: videos } = await db.query<{ target_status: string }[]>(
+      `/videos?select=target_status&stream_uid=eq.${body.uid}&limit=1`
+    )
+    const targetStatus = videos?.[0]?.target_status ?? 'published'
     await db.query(`/videos?stream_uid=eq.${body.uid}`, {
       method: 'PATCH',
       body: JSON.stringify({
-        status: 'published',
+        status: targetStatus,
         duration: body.duration ? Math.floor(body.duration) : undefined,
         thumbnail_url: body.thumbnail || undefined,
       }),

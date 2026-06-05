@@ -19,6 +19,7 @@ export function UploadForm() {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [category, setCategory] = useState('')
+  const [visibility, setVisibility] = useState<'published' | 'private' | 'unlisted'>('published')
   const [error, setError] = useState('')
 
   // 채널 자동 생성 (Google 로그인 사용자)
@@ -70,6 +71,7 @@ export function UploadForm() {
         description,
         stream_uid: streamUid,
         category: category || undefined,
+        visibility,
       })
 
       // 4. 완료 → 홈으로 이동
@@ -198,6 +200,34 @@ export function UploadForm() {
             <option value="">카테고리 선택 (선택사항)</option>
             {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
+        </div>
+
+        {/* 공개 설정 */}
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-2">공개 설정</label>
+          <div className="grid grid-cols-3 gap-3">
+            {([
+              { value: 'published', icon: '🌐', label: '전체공개', desc: '누구나 볼 수 있습니다' },
+              { value: 'unlisted',  icon: '🔗', label: '일부공개', desc: '링크가 있는 사람만' },
+              { value: 'private',   icon: '🔒', label: '비공개',   desc: '본인만 볼 수 있습니다' },
+            ] as const).map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => setVisibility(opt.value)}
+                className={`flex flex-col items-center gap-1 px-3 py-3 rounded-xl border-2 text-center transition-colors ${
+                  visibility === opt.value
+                    ? 'border-sky-400 bg-sky-50 text-sky-700'
+                    : 'border-sky-100 bg-white text-slate-600 hover:border-sky-200 hover:bg-sky-50'
+                }`}
+              >
+                <span className="text-xl">{opt.icon}</span>
+                <span className="text-sm font-semibold">{opt.label}</span>
+                <span className="text-xs text-slate-400 leading-tight">{opt.desc}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* 업로드 진행률 */}

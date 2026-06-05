@@ -220,6 +220,7 @@ app.post(
       duration: z.number().positive().transform(Math.floor).optional(),
       category: z.string().max(50).optional(),
       tags: z.array(z.string().max(30)).max(10).default([]),
+      visibility: z.enum(['published', 'private', 'unlisted']).default('published'),
     })
   ),
   async (c) => {
@@ -234,12 +235,14 @@ app.post(
       return c.json({ error: 'Channel not found. Create a channel first.' }, 400)
     }
 
+    const { visibility, ...videoBody } = body
     const { data, error } = await db.query<unknown[]>('/videos', {
       method: 'POST',
       body: JSON.stringify({
-        ...body,
+        ...videoBody,
         channel_id: channels[0]!.id,
         status: 'processing',
+        target_status: visibility,  // 트랜스코딩 완료 후 전환될 상태
         view_count: 0,
         like_count: 0,
       }),

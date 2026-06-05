@@ -64,6 +64,7 @@ create table if not exists videos (
   thumbnail_url   text,
   duration        integer,
   status          video_status not null default 'processing',
+  target_status   video_status not null default 'published',  -- 트랜스코딩 완료 후 전환될 공개 상태
   category        text,
   tags            text[] not null default '{}',
   view_count      bigint not null default 0,

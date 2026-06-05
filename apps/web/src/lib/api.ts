@@ -94,6 +94,7 @@ export const api = {
       duration?: number
       category?: string
       tags?: string[]
+      visibility?: 'published' | 'private' | 'unlisted'
     }) => request<{ data: Video }>('/api/videos', { method: 'POST', body: JSON.stringify(body) }),
     like: (id: string) =>
       request<{ liked: boolean }>(`/api/videos/${id}/like`, { method: 'POST' }),
