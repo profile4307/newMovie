@@ -404,3 +404,36 @@ begin
     limit p_limit;
 end;
 $$ language plpgsql stable security definer;
+
+-- 구독순 피드: 채널별 최신 영상 그룹핑 (채널은 가장 최근 업로드 순)
+create or replace function get_subscription_feed_by_channel(p_user_id uuid, p_videos_per_channel int default 6)
+returns table(
+  video_id uuid, title text, thumbnail_url text, stream_uid text,
+  duration int, view_count bigint, created_at timestamptz,
+  channel_id uuid, channel_name text, channel_avatar_url text,
+  channel_latest_at timestamptz
+) as $$
+  with channel_order as (
+    select c.id, c.name, c.avatar_url,
+           max(v.created_at) as latest_at
+    from channels c
+    inner join subscriptions s on s.channel_id = c.id and s.user_id = p_user_id
+    left join videos v on v.channel_id = c.id and v.status = 'published'
+    group by c.id, c.name, c.avatar_url
+  ),
+  ranked as (
+    select v.id, v.title, v.thumbnail_url, v.stream_uid,
+           v.duration, v.view_count, v.created_at, v.channel_id,
+           co.name as ch_name, co.avatar_url as ch_avatar, co.latest_at,
+           row_number() over (partition by v.channel_id order by v.created_at desc) as rn
+    from videos v
+    inner join channel_order co on co.id = v.channel_id
+    where v.status = 'published'
+  )
+  select r.id, r.title, r.thumbnail_url, r.stream_uid,
+         r.duration, r.view_count, r.created_at,
+         r.channel_id, r.ch_name, r.ch_avatar, r.latest_at
+  from ranked r
+  where r.rn <= p_videos_per_channel
+  order by r.latest_at desc nulls last, r.channel_id, r.created_at desc;
+$$ language sql stable security definer;

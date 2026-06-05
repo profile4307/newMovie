@@ -74,7 +74,7 @@ app.get(
 
       const { data, error } = await db.rpc<
         { id: string; title: string; description: string; thumbnail_url: string | null; stream_uid: string; duration: number | null; view_count: number; like_count: number; category: string | null; tags: string[]; created_at: string; channel_id: string }[]
-      >('get_subscription_feed', { p_user_id: userId, p_limit: limit, p_offset: offset })
+      >('get_subscription_feed', { p_user_id: userId, p_limit: 200, p_offset: offset })
       if (error) return c.json({ error }, 500)
       const withChannels = await attachChannels(db, data ?? [])
       return c.json({ data: withChannels, feed, page, limit })
@@ -105,6 +105,48 @@ app.get(
     return c.json({ data: withChannels, feed, page, limit })
   }
 )
+
+// ─── 구독순 피드 (채널별 그룹) ──────────────────────────────────────────────
+app.get('/subscription-by-channel', requireAuth, async (c) => {
+  const userId = c.get('userId')
+  const db = createSupabaseClient(c.env)
+
+  type Row = {
+    video_id: string; title: string; thumbnail_url: string | null; stream_uid: string
+    duration: number | null; view_count: number; created_at: string
+    channel_id: string; channel_name: string; channel_avatar_url: string | null; channel_latest_at: string
+  }
+
+  const { data, error } = await db.rpc<Row[]>('get_subscription_feed_by_channel', {
+    p_user_id: userId,
+    p_videos_per_channel: 6,
+  })
+  if (error) return c.json({ error }, 500)
+
+  // 채널별 그룹핑
+  type ChannelGroup = {
+    channel: { id: string; name: string; avatar_url: string | null; latest_at: string }
+    videos: { id: string; title: string; thumbnail_url: string | null; stream_uid: string; duration: number | null; view_count: number; created_at: string }[]
+  }
+  const map: Record<string, ChannelGroup> = {}
+  for (const row of data ?? []) {
+    if (!map[row.channel_id]) {
+      map[row.channel_id] = {
+        channel: { id: row.channel_id, name: row.channel_name, avatar_url: row.channel_avatar_url, latest_at: row.channel_latest_at },
+        videos: [],
+      }
+    }
+    map[row.channel_id]!.videos.push({
+      id: row.video_id, title: row.title, thumbnail_url: row.thumbnail_url,
+      stream_uid: row.stream_uid, duration: row.duration,
+      view_count: row.view_count, created_at: row.created_at,
+    })
+  }
+  const groups = Object.values(map).sort((a, b) =>
+    b.channel.latest_at.localeCompare(a.channel.latest_at)
+  )
+  return c.json({ data: groups })
+})
 
 // ─── 동영상 상세 ─────────────────────────────────────────────────────────────
 app.get('/:id', async (c) => {
@@ -158,7 +200,7 @@ app.post(
       description: z.string().max(5000).default(''),
       stream_uid: z.string().min(1).max(200),
       thumbnail_url: z.string().url().optional(),
-      duration: z.number().int().positive().optional(),
+      duration: z.number().positive().transform(Math.floor).optional(),
       category: z.string().max(50).optional(),
       tags: z.array(z.string().max(30)).max(10).default([]),
     })
@@ -180,7 +222,7 @@ app.post(
       body: JSON.stringify({
         ...body,
         channel_id: channels[0]!.id,
-        status: 'processing',
+        status: 'published',
         view_count: 0,
         like_count: 0,
       }),

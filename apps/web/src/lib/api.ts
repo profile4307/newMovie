@@ -21,7 +21,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error((err as { error: string }).error ?? 'Request failed')
+    const raw = (err as { error: unknown }).error
+    const msg = typeof raw === 'string' ? raw : JSON.stringify(raw)
+    throw new Error(msg ?? 'Request failed')
   }
 
   return res.json() as Promise<T>

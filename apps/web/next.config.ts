@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
       { protocol: 'https', hostname: '*.cloudflarestream.com' },
       { protocol: 'https', hostname: 'imagedelivery.net' },
       { protocol: 'https', hostname: '*.supabase.co' },
+      { protocol: 'https', hostname: 'lh3.googleusercontent.com' },
     ],
   },
 };

@@ -26,8 +26,7 @@ function timeAgo(dateStr: string): string {
   const days = Math.floor(hours / 24)
   if (days < 30) return `${days}일 전`
   const months = Math.floor(days / 30)
-  if (months < 12) return `${months}개월 전`
-  return `${Math.floor(months / 12)}년 전`
+  return months < 12 ? `${months}개월 전` : `${Math.floor(months / 12)}년 전`
 }
 
 type Props = { video: Video }
@@ -35,7 +34,7 @@ type Props = { video: Video }
 export function VideoCard({ video }: Props) {
   return (
     <Link href={`/watch/${video.id}`} className="group block">
-      <div className="relative aspect-video bg-gray-900 rounded-xl overflow-hidden">
+      <div className="relative aspect-video bg-sky-100 rounded-xl overflow-hidden shadow-sm">
         {video.thumbnail_url ? (
           <Image
             src={video.thumbnail_url}
@@ -44,31 +43,31 @@ export function VideoCard({ video }: Props) {
             className="object-cover group-hover:scale-105 transition-transform duration-200"
           />
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-gray-600">
+          <div className="absolute inset-0 flex items-center justify-center text-sky-300">
             <svg className="w-12 h-12" fill="currentColor" viewBox="0 0 24 24">
               <path d="M8 5v14l11-7z" />
             </svg>
           </div>
         )}
         {video.duration && (
-          <span className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-1.5 py-0.5 rounded">
+          <span className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-1.5 py-0.5 rounded">
             {formatDuration(video.duration)}
           </span>
         )}
       </div>
 
-      <div className="mt-3 flex gap-3">
-        <div className="flex-shrink-0 w-9 h-9 rounded-full bg-gray-700 overflow-hidden">
+      <div className="mt-2.5 flex gap-2.5">
+        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-sky-200 overflow-hidden">
           {video.channel.avatar_url && (
-            <Image src={video.channel.avatar_url} alt={video.channel.name} width={36} height={36} />
+            <Image src={video.channel.avatar_url} alt={video.channel.name} width={32} height={32} />
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className="font-medium text-sm leading-snug line-clamp-2 text-white group-hover:text-blue-400 transition-colors">
+          <h3 className="font-semibold text-sm leading-snug line-clamp-2 text-slate-900 group-hover:text-sky-600 transition-colors">
             {video.title}
           </h3>
-          <p className="text-gray-400 text-xs mt-1">{video.channel.name}</p>
-          <p className="text-gray-500 text-xs">
+          <p className="text-slate-500 text-xs mt-0.5">{video.channel.name}</p>
+          <p className="text-slate-400 text-xs">
             조회수 {formatCount(video.view_count)} · {timeAgo(video.created_at)}
           </p>
         </div>

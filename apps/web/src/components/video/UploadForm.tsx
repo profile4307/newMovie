@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
+import { supabase } from '@/lib/supabase'
 
 type UploadState = 'idle' | 'uploading' | 'processing' | 'saving' | 'done' | 'error'
 
@@ -17,6 +18,40 @@ export function UploadForm() {
   const [category, setCategory] = useState('')
   const [error, setError] = useState('')
 
+  // 로그인 후 채널이 없으면 자동 생성
+  useEffect(() => {
+    async function ensureChannel() {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) return
+
+      try {
+        await api.auth.me()
+      } catch {
+        // users 테이블에 없으면 생성
+        const name = (session.user.user_metadata?.full_name
+          ?? session.user.user_metadata?.name
+          ?? session.user.email
+          ?? '사용자') as string
+        const username = name.replace(/\s+/g, '_').slice(0, 30)
+        await api.auth.createProfile(username).catch(() => null)
+      }
+
+      // 채널 없으면 자동 생성
+      try {
+        await api.channels.create({
+          name: (session.user.user_metadata?.full_name
+            ?? session.user.user_metadata?.name
+            ?? session.user.email
+            ?? '내 채널') as string,
+          description: '',
+        })
+      } catch {
+        // 이미 있으면 무시
+      }
+    }
+    ensureChannel()
+  }, [])
+
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -26,18 +61,13 @@ export function UploadForm() {
       setProgress(0)
       setError('')
 
-      // 1. 업로드 URL 발급
       const { uploadUrl, streamUid: uid } = await api.upload.getStreamUrl()
       setStreamUid(uid)
 
-      // 2. Cloudflare Stream으로 직접 업로드 (tus 또는 multipart)
       await uploadWithProgress(file, uploadUrl, setProgress)
 
       setState('processing')
-
-      // 3. 트랜스코딩 완료 대기 (폴링)
       await waitForProcessing(uid)
-
       setState('idle')
     } catch (err) {
       setError(err instanceof Error ? err.message : '업로드 실패')
@@ -57,9 +87,9 @@ export function UploadForm() {
       })
       xhr.addEventListener('load', () => {
         if (xhr.status >= 200 && xhr.status < 300) resolve()
-        else reject(new Error(`Upload failed: ${xhr.status}`))
+        else reject(new Error(`업로드 실패 (${xhr.status})`))
       })
-      xhr.addEventListener('error', () => reject(new Error('Network error')))
+      xhr.addEventListener('error', () => reject(new Error('네트워크 오류')))
       xhr.open('POST', uploadUrl)
       const fd = new FormData()
       fd.append('file', file)
@@ -89,13 +119,14 @@ export function UploadForm() {
         description,
         stream_uid: streamUid,
         thumbnail_url: status.thumbnail || undefined,
-        duration: status.duration || undefined,
+        duration: status.duration ? Math.floor(status.duration) : undefined,
         category: category || undefined,
       })
       setState('done')
       router.push('/')
     } catch (err) {
-      setError(err instanceof Error ? err.message : '저장 실패')
+      const msg = err instanceof Error ? err.message : '저장 실패'
+      setError(msg)
       setState('error')
     }
   }
@@ -107,7 +138,7 @@ export function UploadForm() {
       <h1 className="text-2xl font-bold text-white mb-8">동영상 업로드</h1>
 
       {/* 파일 선택 영역 */}
-      {!streamUid && (
+      {!streamUid && state !== 'uploading' && state !== 'processing' && (
         <div
           className="border-2 border-dashed border-gray-600 rounded-xl p-12 text-center cursor-pointer hover:border-blue-500 transition-colors"
           onClick={() => fileRef.current?.click()}
@@ -141,15 +172,20 @@ export function UploadForm() {
       )}
 
       {state === 'processing' && (
-        <div className="mt-4 text-center text-gray-400">
-          <div className="inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-3" />
-          <p>트랜스코딩 처리 중... (수 분 소요)</p>
+        <div className="mt-8 text-center text-gray-400">
+          <div className="inline-block w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4" />
+          <p className="text-white font-medium">트랜스코딩 처리 중...</p>
+          <p className="text-sm mt-1">완료까지 수 분이 걸릴 수 있습니다</p>
         </div>
       )}
 
       {/* 메타데이터 입력 폼 */}
       {streamUid && state === 'idle' && (
         <form onSubmit={handleSubmit} className="space-y-6 mt-6">
+          <div className="p-3 bg-green-900/30 border border-green-700 rounded-lg text-green-400 text-sm">
+            ✅ 업로드 완료 — 아래 정보를 입력하고 등록하세요
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">제목 *</label>
             <input
@@ -192,7 +228,7 @@ export function UploadForm() {
           <button
             type="submit"
             disabled={!title}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:text-gray-500 text-white font-medium py-3 rounded-lg transition-colors"
+            className="w-full bg-sky-600 hover:bg-sky-700 disabled:bg-sky-200 disabled:text-sky-400 text-white font-medium py-3 rounded-lg transition-colors"
           >
             업로드 완료
           </button>
@@ -200,8 +236,15 @@ export function UploadForm() {
       )}
 
       {error && (
-        <div className="mt-4 p-4 bg-red-900/50 border border-red-700 rounded-lg text-red-400">
-          {error}
+        <div className="mt-4 p-4 bg-red-900/50 border border-red-700 rounded-lg text-red-400 text-sm">
+          <p className="font-medium mb-1">오류 발생</p>
+          <p>{error}</p>
+          <button
+            onClick={() => { setError(''); setState('idle'); setStreamUid('') }}
+            className="mt-3 text-xs underline hover:text-red-300"
+          >
+            다시 시도
+          </button>
         </div>
       )}
     </div>
