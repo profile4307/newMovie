@@ -137,14 +137,19 @@ function CommentItem({
   onDelete: (id: string) => void
 }) {
   const [showReplies, setShowReplies] = useState(false)
+  // 대댓글 수는 첫 클릭 시 lazy 로드 (마운트 시 N번 API 호출 방지)
   const [replyCount, setReplyCount] = useState<number | null>(null)
+  const [loadedOnce, setLoadedOnce] = useState(false)
 
-  // 대댓글 수 비동기 조회
-  useEffect(() => {
-    api.comments.replies(comment.id)
-      .then((r) => setReplyCount(r.data.length))
-      .catch(() => setReplyCount(0))
-  }, [comment.id])
+  function toggleReplies() {
+    setShowReplies((v) => !v)
+    if (!loadedOnce) {
+      setLoadedOnce(true)
+      api.comments.replies(comment.id)
+        .then((r) => setReplyCount(r.data.length))
+        .catch(() => setReplyCount(0))
+    }
+  }
 
   return (
     <div className="group">
@@ -159,12 +164,12 @@ function CommentItem({
 
           {/* 답글 토글 버튼 */}
           <button
-            onClick={() => setShowReplies((v) => !v)}
+            onClick={toggleReplies}
             className="mt-1.5 text-xs text-sky-500 hover:text-sky-700 font-medium transition-colors"
           >
             {showReplies
               ? '답글 접기'
-              : replyCount
+              : replyCount !== null && replyCount > 0
               ? `답글 ${replyCount}개 보기`
               : '답글'}
           </button>

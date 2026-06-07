@@ -417,7 +417,7 @@ declare
   v_cat   text;
   v_tsq   tsquery;
 begin
-  select tags, category into v_tags, v_cat from videos where id = p_video_id;
+  select tags, category into v_tags, v_cat from videos where videos.id = p_video_id;
 
   if v_tags is not null and array_length(v_tags, 1) > 0 then
     select string_agg(t || ':*', ' | ')
