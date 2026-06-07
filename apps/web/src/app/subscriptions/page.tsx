@@ -76,6 +76,7 @@ export default function SubscriptionsPage() {
   const [latestVideos, setLatestVideos] = useState<Video[]>([])
   const [loading, setLoading] = useState(true)
   const [authError, setAuthError] = useState(false)
+  const [fetchError, setFetchError] = useState('')
 
   useEffect(() => {
     loadData(mode)
@@ -83,6 +84,7 @@ export default function SubscriptionsPage() {
 
   async function loadData(m: SortMode) {
     setLoading(true)
+    setFetchError('')
     try {
       if (m === 'by_channel') {
         const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8787'
@@ -94,6 +96,11 @@ export default function SubscriptionsPage() {
           headers: { Authorization: `Bearer ${session.access_token}` },
         })
         if (res.status === 401) { setAuthError(true); return }
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({})) as { error?: unknown }
+          setFetchError(`서버 오류: ${JSON.stringify(err.error ?? res.status)}`)
+          return
+        }
         const json = await res.json() as { data: ChannelGroup[] }
         setGroups(json.data ?? [])
       } else {
@@ -101,8 +108,9 @@ export default function SubscriptionsPage() {
         setLatestVideos(result.data)
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : ''
+      const msg = err instanceof Error ? err.message : String(err)
       if (msg.includes('Login required') || msg.includes('Unauthorized')) setAuthError(true)
+      else setFetchError(msg)
     } finally {
       setLoading(false)
     }
@@ -149,6 +157,12 @@ export default function SubscriptionsPage() {
         {loading ? (
           <div className="flex justify-center py-20">
             <div className="w-8 h-8 border-4 border-sky-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : fetchError ? (
+          <div className="bg-red-50 border border-red-200 rounded-xl px-5 py-4 text-red-600 text-sm">
+            <p className="font-semibold mb-1">데이터를 불러오지 못했습니다</p>
+            <p className="font-mono text-xs break-all">{fetchError}</p>
+            <button onClick={() => loadData(mode)} className="mt-3 text-sky-600 hover:underline text-sm">다시 시도</button>
           </div>
         ) : mode === 'by_channel' ? (
           /* 구독순: 채널별 그룹 */

@@ -176,11 +176,11 @@ app.get('/:id', async (c) => {
     id: string; title: string; description: string; thumbnail_url: string | null
     stream_uid: string; duration: number | null; view_count: number; like_count: number; comment_count: number
     category: string | null; tags: string[]; created_at: string; status: string
-    channel: { id: string; name: string; avatar_url: string | null; subscriber_count: number; owner_id: string }
+    channel: { id: string; name: string; avatar_url: string | null; subscriber_count: number; owner_id: string; owner: { avatar_url: string | null } | null }
   }
 
   const { data, error } = await db.query<VideoRow[]>(
-    `/videos?select=id,title,description,thumbnail_url,stream_uid,duration,view_count,like_count,comment_count,category,tags,created_at,status,channel:channels(id,name,avatar_url,subscriber_count,owner_id)&id=eq.${id}&limit=1`
+    `/videos?select=id,title,description,thumbnail_url,stream_uid,duration,view_count,like_count,comment_count,category,tags,created_at,status,channel:channels(id,name,avatar_url,subscriber_count,owner_id,owner:users!owner_id(avatar_url))&id=eq.${id}&limit=1`
   )
 
   if (error) return c.json({ error }, 500)
@@ -205,8 +205,12 @@ app.get('/:id', async (c) => {
     c.executionCtx.waitUntil(db.rpc('increment_view_count', { p_video_id: id }))
   }
 
-  // owner_id는 응답에서 제외
-  const { channel: { owner_id: _, ...channelPublic }, ...videoPublic } = video
+  // owner_id 제외, avatar_url 없으면 소유자 users.avatar_url로 fallback
+  const { channel: { owner_id: _, owner, ...channelRest }, ...videoPublic } = video
+  const channelPublic = {
+    ...channelRest,
+    avatar_url: channelRest.avatar_url || owner?.avatar_url || null,
+  }
   return c.json({ data: { ...videoPublic, channel: channelPublic } })
 })
 
