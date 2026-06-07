@@ -149,10 +149,8 @@ function CommentItem({
   onDelete: (id: string) => void
 }) {
   const [showReplies, setShowReplies] = useState(false)
-  // 초기값: 댓글 목록 쿼리에서 받아온 count, 클릭 후엔 실제 로드 결과로 갱신
-  const [replyCount, setReplyCount] = useState<number>(
-    comment.replies?.[0]?.count ?? 0
-  )
+  // 초기값: 저장된 reply_count 컬럼, 클릭 후엔 실제 로드 결과로 갱신
+  const [replyCount, setReplyCount] = useState<number>(comment.reply_count ?? 0)
   const [loadedOnce, setLoadedOnce] = useState(false)
 
   function toggleReplies() {
@@ -211,8 +209,9 @@ function CommentItem({
 }
 
 // ─── 메인 CommentSection ─────────────────────────────────────────────────
-export function CommentSection({ videoId }: { videoId: string }) {
+export function CommentSection({ videoId, initialCommentCount = 0 }: { videoId: string; initialCommentCount?: number }) {
   const [comments, setComments] = useState<Comment[]>([])
+  const [commentCount, setCommentCount] = useState(initialCommentCount)
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(true)
   const [loading, setLoading] = useState(true)
@@ -261,6 +260,7 @@ export function CommentSection({ videoId }: { videoId: string }) {
     try {
       const res = await api.comments.create({ video_id: videoId, content: text.trim() })
       setComments((prev) => [res.data, ...prev])
+      setCommentCount((n) => n + 1)
       setText('')
       if (mainTextareaRef.current) {
         mainTextareaRef.current.style.height = 'auto'
@@ -274,12 +274,13 @@ export function CommentSection({ videoId }: { videoId: string }) {
     if (!confirm('이 댓글을 삭제하시겠습니까?')) return
     await api.comments.delete(id)
     setComments((prev) => prev.filter((c) => c.id !== id))
+    setCommentCount((n) => Math.max(0, n - 1))
   }
 
   return (
     <div className="mt-6 bg-white rounded-2xl p-5 shadow-sm border border-sky-100">
       <h3 className="font-bold text-slate-800 mb-5">
-        댓글 {comments.length > 0 && <span className="text-slate-400 font-normal text-sm">{comments.length}개</span>}
+        댓글 {commentCount > 0 && <span className="text-slate-400 font-normal text-sm">{commentCount}개</span>}
       </h3>
 
       {/* 댓글 입력 */}

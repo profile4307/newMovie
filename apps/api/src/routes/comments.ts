@@ -32,7 +32,7 @@ app.get(
     const db = createSupabaseClient(c.env)
 
     const { data, error } = await db.query<unknown[]>(
-      `/comments?select=id,content,created_at,user:users(id,username,avatar_url),replies:comments!parent_id(count)&video_id=eq.${video_id}&parent_id=is.null&order=created_at.desc&limit=${limit}&offset=${offset}`
+      `/comments?select=id,content,created_at,reply_count,user:users(id,username,avatar_url)&video_id=eq.${video_id}&parent_id=is.null&order=created_at.desc&limit=${limit}&offset=${offset}`
     )
 
     if (error) return c.json({ error }, 500)

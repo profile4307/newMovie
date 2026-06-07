@@ -110,6 +110,7 @@ create table if not exists videos (
   tags            text[] not null default '{}',
   view_count      bigint not null default 0,
   like_count      bigint not null default 0,
+  comment_count   integer not null default 0,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
@@ -226,6 +227,7 @@ create table if not exists comments (
   user_id     uuid not null references users(id) on delete cascade,
   parent_id   uuid references comments(id) on delete cascade,
   content     text not null check (char_length(content) <= 2000),
+  reply_count integer not null default 0,
   created_at  timestamptz not null default now()
 );
 
@@ -239,6 +241,35 @@ create policy "Comments are viewable by everyone"
 
 create policy "Users can manage own comments"
   on comments for all using (auth.uid() = user_id);
+
+-- comment_count / reply_count 자동 유지 트리거
+-- INSERT/DELETE 시 원자적으로 카운터를 증감 (실시간 COUNT 조회 불필요)
+create or replace function update_comment_counts()
+returns trigger as $$
+begin
+  if tg_op = 'INSERT' then
+    if new.parent_id is not null then
+      -- 대댓글: 부모 댓글의 reply_count 증가
+      update comments set reply_count = reply_count + 1 where id = new.parent_id;
+    else
+      -- 최상위 댓글: 영상의 comment_count 증가
+      update videos set comment_count = comment_count + 1 where id = new.video_id;
+    end if;
+  elsif tg_op = 'DELETE' then
+    if old.parent_id is not null then
+      update comments set reply_count = greatest(0, reply_count - 1) where id = old.parent_id;
+    else
+      update videos set comment_count = greatest(0, comment_count - 1) where id = old.video_id;
+    end if;
+  end if;
+  return coalesce(new, old);
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists on_comment_change on comments;
+create trigger on_comment_change
+  after insert or delete on comments
+  for each row execute function update_comment_counts();
 
 -- =============================================
 -- 신고

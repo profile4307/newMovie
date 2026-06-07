@@ -201,7 +201,7 @@ export default function WatchPage() {
             </div>
 
             {/* 댓글 */}
-            <CommentSection videoId={video.id} />
+            <CommentSection videoId={video.id} initialCommentCount={video.comment_count ?? 0} />
           </div>
 
           {/* 관련 영상 */}

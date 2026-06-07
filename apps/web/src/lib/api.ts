@@ -38,6 +38,7 @@ export type Video = {
   duration: number | null
   view_count: number
   like_count: number
+  comment_count: number
   category: string | null
   tags: string[]
   created_at: string
@@ -65,7 +66,7 @@ export type Comment = {
   content: string
   created_at: string
   user: { id: string; username: string; avatar_url: string | null }
-  replies?: [{ count: number }]  // PostgREST embedded count
+  reply_count: number
 }
 
 export type FeedType = 'trending' | 'subscriptions' | 'latest'
