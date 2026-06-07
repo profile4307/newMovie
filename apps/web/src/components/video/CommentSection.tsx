@@ -1,9 +1,15 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Image from 'next/image'
 import { api, type Comment } from '@/lib/api'
 import { supabase } from '@/lib/supabase'
+
+// textarea 높이를 내용에 맞게 자동 조정
+function autoResize(el: HTMLTextAreaElement) {
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight}px`
+}
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime()
@@ -44,6 +50,7 @@ function ReplySection({
   const [loading, setLoading] = useState(true)
   const [replyText, setReplyText] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const replyTextareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     api.comments.replies(parentId)
@@ -59,6 +66,9 @@ function ReplySection({
       const res = await api.comments.create({ video_id: videoId, content: replyText.trim(), parent_id: parentId })
       setReplies((prev) => [...prev, res.data])
       setReplyText('')
+      if (replyTextareaRef.current) {
+        replyTextareaRef.current.style.height = 'auto'
+      }
     } catch { /* ignore */ } finally {
       setSubmitting(false)
     }
@@ -101,14 +111,17 @@ function ReplySection({
       {currentUserId && (
         <div className="flex gap-2 pt-1">
           <div className="w-7 h-7 rounded-full bg-sky-100 flex-shrink-0" />
-          <div className="flex-1 flex gap-2">
-            <input
+          <div className="flex-1 flex gap-2 items-end">
+            <textarea
+              ref={replyTextareaRef}
               value={replyText}
               onChange={(e) => setReplyText(e.target.value)}
+              onInput={(e) => autoResize(e.currentTarget)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitReply() } }}
               placeholder="답글 추가..."
               maxLength={2000}
-              className="flex-1 text-sm bg-transparent border-b border-slate-200 focus:border-sky-400 outline-none py-1 placeholder-slate-300 text-slate-800 transition-colors"
+              rows={1}
+              className="flex-1 text-sm bg-transparent border-b border-slate-200 focus:border-sky-400 outline-none py-1 placeholder-slate-300 text-slate-800 transition-colors resize-none overflow-hidden"
             />
             <button
               onClick={submitReply}
@@ -206,6 +219,7 @@ export function CommentSection({ videoId }: { videoId: string }) {
   const [text, setText] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const mainTextareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -247,6 +261,9 @@ export function CommentSection({ videoId }: { videoId: string }) {
       const res = await api.comments.create({ video_id: videoId, content: text.trim() })
       setComments((prev) => [res.data, ...prev])
       setText('')
+      if (mainTextareaRef.current) {
+        mainTextareaRef.current.style.height = 'auto'
+      }
     } catch { /* ignore */ } finally {
       setSubmitting(false)
     }
@@ -270,12 +287,14 @@ export function CommentSection({ videoId }: { videoId: string }) {
           <div className="w-8 h-8 rounded-full bg-sky-100 flex-shrink-0" />
           <div className="flex-1">
             <textarea
+              ref={mainTextareaRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
+              onInput={(e) => autoResize(e.currentTarget)}
               placeholder="댓글 추가..."
               maxLength={2000}
-              rows={2}
-              className="w-full text-sm bg-transparent border-b border-slate-200 focus:border-sky-400 outline-none py-1 placeholder-slate-300 text-slate-800 transition-colors resize-none"
+              rows={1}
+              className="w-full text-sm bg-transparent border-b border-slate-200 focus:border-sky-400 outline-none py-1 placeholder-slate-300 text-slate-800 transition-colors resize-none overflow-hidden"
             />
             <div className="flex justify-end mt-2 gap-2">
               <button
