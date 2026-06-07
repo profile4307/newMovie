@@ -41,10 +41,12 @@ function ReplySection({
   parentId,
   videoId,
   currentUserId,
+  onCountChange,
 }: {
   parentId: string
   videoId: string
   currentUserId: string | null
+  onCountChange: (delta: number) => void
 }) {
   const [replies, setReplies] = useState<Comment[]>([])
   const [loading, setLoading] = useState(true)
@@ -65,6 +67,7 @@ function ReplySection({
     try {
       const res = await api.comments.create({ video_id: videoId, content: replyText.trim(), parent_id: parentId })
       setReplies((prev) => [...prev, res.data])
+      onCountChange(+1)
       setReplyText('')
       if (replyTextareaRef.current) {
         replyTextareaRef.current.style.height = 'auto'
@@ -78,6 +81,7 @@ function ReplySection({
     if (!confirm('이 답글을 삭제하시겠습니까?')) return
     await api.comments.delete(id)
     setReplies((prev) => prev.filter((r) => r.id !== id))
+    onCountChange(-1)
   }
 
   return (
@@ -202,6 +206,7 @@ function CommentItem({
           parentId={comment.id}
           videoId={videoId}
           currentUserId={currentUserId}
+          onCountChange={(delta) => setReplyCount((n) => Math.max(0, n + delta))}
         />
       )}
     </div>
