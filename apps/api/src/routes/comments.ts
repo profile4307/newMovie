@@ -57,10 +57,13 @@ app.post(
     const body = c.req.valid('json')
     const db = createSupabaseClient(c.env)
 
-    const { data, error } = await db.query<unknown[]>('/comments', {
-      method: 'POST',
-      body: JSON.stringify({ ...body, user_id: userId }),
-    })
+    const { data, error } = await db.query<unknown[]>(
+      '/comments?select=id,content,created_at,user:users(id,username,avatar_url)',
+      {
+        method: 'POST',
+        body: JSON.stringify({ ...body, user_id: userId }),
+      }
+    )
 
     if (error) return c.json({ error }, 500)
     return c.json({ data: data?.[0] }, 201)
