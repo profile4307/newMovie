@@ -65,7 +65,7 @@ export type Comment = {
   content: string
   created_at: string
   user: { id: string; username: string; avatar_url: string | null }
-  reply_count?: number
+  replies?: [{ count: number }]  // PostgREST embedded count
 }
 
 export type FeedType = 'trending' | 'subscriptions' | 'latest'

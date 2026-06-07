@@ -149,8 +149,10 @@ function CommentItem({
   onDelete: (id: string) => void
 }) {
   const [showReplies, setShowReplies] = useState(false)
-  // 대댓글 수는 첫 클릭 시 lazy 로드 (마운트 시 N번 API 호출 방지)
-  const [replyCount, setReplyCount] = useState<number | null>(null)
+  // 초기값: 댓글 목록 쿼리에서 받아온 count, 클릭 후엔 실제 로드 결과로 갱신
+  const [replyCount, setReplyCount] = useState<number>(
+    comment.replies?.[0]?.count ?? 0
+  )
   const [loadedOnce, setLoadedOnce] = useState(false)
 
   function toggleReplies() {
@@ -159,7 +161,7 @@ function CommentItem({
       setLoadedOnce(true)
       api.comments.replies(comment.id)
         .then((r) => setReplyCount(r.data.length))
-        .catch(() => setReplyCount(0))
+        .catch(() => {})
     }
   }
 
@@ -181,7 +183,7 @@ function CommentItem({
           >
             {showReplies
               ? '답글 접기'
-              : replyCount !== null && replyCount > 0
+              : replyCount > 0
               ? `답글 ${replyCount}개 보기`
               : '답글'}
           </button>
