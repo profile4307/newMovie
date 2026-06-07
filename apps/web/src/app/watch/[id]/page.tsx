@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { VideoPlayer } from '@/components/video/VideoPlayer'
 import { ShareButton } from '@/components/video/ShareButton'
 import { VideoActions } from '@/components/video/VideoActions'
+import { CommentSection } from '@/components/video/CommentSection'
 import { api, type Video } from '@/lib/api'
 
 const CF_SUBDOMAIN = process.env.NEXT_PUBLIC_BUNNY_CDN_HOSTNAME ?? process.env.NEXT_PUBLIC_CF_STREAM_CUSTOMER_SUBDOMAIN ?? 'cdn-hostname'
@@ -198,6 +199,9 @@ export default function WatchPage() {
                 )}
               </div>
             </div>
+
+            {/* 댓글 */}
+            <CommentSection videoId={video.id} />
           </div>
 
           {/* 관련 영상 */}

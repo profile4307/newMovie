@@ -65,6 +65,7 @@ export type Comment = {
   content: string
   created_at: string
   user: { id: string; username: string; avatar_url: string | null }
+  reply_count?: number
 }
 
 export type FeedType = 'trending' | 'subscriptions' | 'latest'
@@ -131,6 +132,8 @@ export const api = {
   comments: {
     list: (videoId: string, page = 1) =>
       request<{ data: Comment[] }>(`/api/comments?video_id=${videoId}&page=${page}`),
+    replies: (commentId: string) =>
+      request<{ data: Comment[] }>(`/api/comments/${commentId}/replies`),
     create: (body: { video_id: string; content: string; parent_id?: string }) =>
       request<{ data: Comment }>('/api/comments', { method: 'POST', body: JSON.stringify(body) }),
     delete: (id: string) => request<{ success: boolean }>(`/api/comments/${id}`, { method: 'DELETE' }),

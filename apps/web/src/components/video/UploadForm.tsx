@@ -9,6 +9,27 @@ type UploadState = 'ready' | 'uploading' | 'saving' | 'done' | 'error'
 
 const CATEGORIES = ['게임', '음악', '교육', '엔터테인먼트', '뉴스', '스포츠', '기술', '여행', '요리', '기타']
 
+const MAX_FILE_SIZE = 500 * 1024 * 1024 // 500MB
+const MAX_DURATION = 180 // 3분 (초)
+
+// HTML5 video 엘리먼트로 재생 시간 측정
+function getVideoDuration(file: File): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const video = document.createElement('video')
+    video.preload = 'metadata'
+    video.onloadedmetadata = () => {
+      URL.revokeObjectURL(url)
+      resolve(video.duration)
+    }
+    video.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('영상 파일을 읽을 수 없습니다'))
+    }
+    video.src = url
+  })
+}
+
 export function UploadForm() {
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
@@ -21,6 +42,7 @@ export function UploadForm() {
   const [category, setCategory] = useState('')
   const [visibility, setVisibility] = useState<'published' | 'private' | 'unlisted'>('published')
   const [error, setError] = useState('')
+  const [durationWarning, setDurationWarning] = useState('')
 
   // 채널 자동 생성 (Google 로그인 사용자)
   useEffect(() => {
@@ -38,12 +60,41 @@ export function UploadForm() {
     ensureChannel()
   }, [])
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null
-    setSelectedFile(file)
     setError('')
+    setDurationWarning('')
+
+    if (!file) {
+      setSelectedFile(null)
+      return
+    }
+
+    // 파일 크기 체크 (500MB)
+    if (file.size > MAX_FILE_SIZE) {
+      setError(`파일 크기는 500MB 이하여야 합니다. (현재: ${(file.size / 1024 / 1024).toFixed(0)}MB)`)
+      if (fileRef.current) fileRef.current.value = ''
+      return
+    }
+
+    // 재생 시간 체크 (3분)
+    try {
+      const duration = await getVideoDuration(file)
+      if (duration > MAX_DURATION) {
+        const mins = Math.floor(duration / 60)
+        const secs = Math.floor(duration % 60)
+        setError(`영상 길이는 3분 이하여야 합니다. (현재: ${mins}분 ${secs}초)`)
+        if (fileRef.current) fileRef.current.value = ''
+        return
+      }
+    } catch {
+      // 재생 시간을 읽을 수 없는 경우 경고만 표시하고 계속 진행
+      setDurationWarning('재생 시간을 확인할 수 없습니다. 3분 이하의 영상만 업로드 가능합니다.')
+    }
+
+    setSelectedFile(file)
     // 파일명에서 기본 제목 추출
-    if (file && !title) {
+    if (!title) {
       const name = file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ')
       setTitle(name.slice(0, 200))
     }
@@ -167,6 +218,7 @@ export function UploadForm() {
               </svg>
               <p className="text-slate-600 font-medium">클릭하여 영상 파일 선택</p>
               <p className="text-slate-400 text-sm mt-1">MP4, MOV, AVI 등 지원</p>
+              <p className="text-slate-400 text-xs mt-2">최대 3분 · 500MB 이하</p>
             </button>
           )}
         </div>
@@ -263,6 +315,13 @@ export function UploadForm() {
           <div className="bg-sky-50 rounded-xl p-4 flex items-center gap-3">
             <div className="w-5 h-5 border-2 border-sky-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
             <p className="text-sm text-slate-600">DB 저장 중...</p>
+          </div>
+        )}
+
+        {/* 경고 */}
+        {durationWarning && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-amber-700 text-sm">
+            ⚠️ {durationWarning}
           </div>
         )}
 

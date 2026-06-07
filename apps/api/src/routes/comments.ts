@@ -67,6 +67,19 @@ app.post(
   }
 )
 
+// 대댓글 목록 (특정 댓글의 답글)
+app.get('/:id/replies', async (c) => {
+  const id = c.req.param('id')
+  if (!isUUID(id)) return c.json({ error: 'Invalid ID' }, 400)
+
+  const db = createSupabaseClient(c.env)
+  const { data, error } = await db.query<unknown[]>(
+    `/comments?select=id,content,created_at,user:users(id,username,avatar_url)&parent_id=eq.${id}&order=created_at.asc`
+  )
+  if (error) return c.json({ error }, 500)
+  return c.json({ data })
+})
+
 // 댓글 삭제
 app.delete('/:id', requireAuth, async (c) => {
   const id = c.req.param('id')

@@ -49,6 +49,8 @@ pnpm build:web                        # Next.js 빌드 (Cloudflare Pages는 CI�
 - **동영상 플레이어**: [`src/components/video/VideoPlayer.tsx`](apps/web/src/components/video/VideoPlayer.tsx) — HLS.js를 동적 import로 로드 (SSR 방지). Bunny Stream HLS URL 패턴: `https://{BUNNY_CDN_HOSTNAME}/{videoId}/playlist.m3u8`.
 - **업로드 흐름**: `UploadForm` → `POST /api/upload/stream-url` (Bunny 비디오 생성 + tus 서명 발급) → `tus-js-client`로 Bunny Stream에 직접 업로드 (endpoint: `https://video.bunnycdn.com/tusupload`) → 폴링으로 트랜스코딩 완료 확인 → `POST /api/videos` (메타데이터 저장).
 - **숫자 포맷**: `formatKorean(n)` — 1000→1천, 1200→1.2천, 10000→1만. 각 컴포넌트에 로컬 함수로 구현됨.
+- **댓글/대댓글**: [`src/components/video/CommentSection.tsx`](apps/web/src/components/video/CommentSection.tsx) — 최상위 댓글은 `parent_id=is.null`, 대댓글은 `GET /api/comments/:id/replies`. 대댓글 수는 CommentItem 마운트 시 비동기 조회.
+- **업로드 제한**: 파일 선택 시 클라이언트에서 500MB 크기 체크 + HTML5 video `loadedmetadata`로 3분(180초) 재생시간 체크. `getVideoDuration()` 헬퍼 함수 `UploadForm.tsx` 내 정의.
 
 ### `packages/db`
 
