@@ -224,11 +224,16 @@ export function CommentSection({ videoId, initialCommentCount = 0 }: { videoId: 
   const [text, setText] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [currentUserAvatar, setCurrentUserAvatar] = useState<string | null>(null)
   const mainTextareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      setCurrentUserId(data.session?.user.id ?? null)
+      const userId = data.session?.user.id ?? null
+      setCurrentUserId(userId)
+      if (userId) {
+        api.auth.me().then((res) => setCurrentUserAvatar(res.data.avatar_url)).catch(() => {})
+      }
     })
   }, [])
 
@@ -291,7 +296,12 @@ export function CommentSection({ videoId, initialCommentCount = 0 }: { videoId: 
       {/* 댓글 입력 */}
       {currentUserId ? (
         <div className="flex gap-3 mb-6">
-          <div className="w-8 h-8 rounded-full bg-sky-100 flex-shrink-0" />
+          <div className="w-8 h-8 rounded-full bg-sky-100 flex-shrink-0 overflow-hidden flex items-center justify-center">
+            {currentUserAvatar
+              ? <Image src={currentUserAvatar} alt="me" width={32} height={32} className="object-cover" />
+              : <span className="text-sky-400 text-xs font-bold">나</span>
+            }
+          </div>
           <div className="flex-1">
             <textarea
               ref={mainTextareaRef}
