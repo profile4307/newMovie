@@ -117,7 +117,6 @@ function ReplySection({
               value={replyText}
               onChange={(e) => setReplyText(e.target.value)}
               onInput={(e) => autoResize(e.currentTarget)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitReply() } }}
               placeholder="답글 추가..."
               maxLength={2000}
               rows={1}
