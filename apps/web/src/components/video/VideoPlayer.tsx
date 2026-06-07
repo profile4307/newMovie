@@ -4,14 +4,15 @@ import { useEffect, useRef } from 'react'
 
 type Props = {
   streamUid: string
-  customerSubdomain: string
+  customerSubdomain: string  // Bunny CDN 호스트명 (하위 호환 prop명 유지)
   poster?: string
 }
 
 export function VideoPlayer({ streamUid, customerSubdomain, poster }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
 
-  const hlsUrl = `https://${customerSubdomain}.cloudflarestream.com/${streamUid}/manifest/video.m3u8`
+  // Bunny Stream HLS URL
+  const hlsUrl = `https://${customerSubdomain}/${streamUid}/playlist.m3u8`
 
   useEffect(() => {
     const video = videoRef.current

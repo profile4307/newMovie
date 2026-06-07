@@ -35,9 +35,15 @@ const STATUS_INFO: Record<string, { label: string; icon: string; className: stri
 
 const CATEGORIES = ['게임', '음악', '교육', '엔터테인먼트', '뉴스', '스포츠', '기술', '여행', '요리', '기타']
 
-function formatCount(n: number) {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+function formatKorean(n: number): string {
+  if (n >= 10000) {
+    const v = n / 10000
+    return (Number.isInteger(v) ? String(v) : v.toFixed(1)) + '만'
+  }
+  if (n >= 1000) {
+    const v = n / 1000
+    return (Number.isInteger(v) ? String(v) : v.toFixed(1)) + '천'
+  }
   return String(n)
 }
 function formatDuration(s: number | null) {
@@ -298,6 +304,7 @@ export default function MyVideosPage() {
   const router = useRouter()
   const { toasts, show: showToast, remove: removeToast } = useToast()
   const [videos, setVideos] = useState<MyVideo[]>([])
+  const [subscriberCount, setSubscriberCount] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [editTarget, setEditTarget] = useState<MyVideo | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<MyVideo | null>(null)
@@ -307,8 +314,12 @@ export default function MyVideosPage() {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) { router.replace('/login'); return }
     try {
-      const result = await api.videos.mine()
-      setVideos(result.data as MyVideo[])
+      const [videosResult, channelResult] = await Promise.all([
+        api.videos.mine(),
+        api.channels.mine(),
+      ])
+      setVideos(videosResult.data as MyVideo[])
+      setSubscriberCount(channelResult.data?.subscriber_count ?? null)
     } catch (e) {
       console.error(e)
     } finally {
@@ -381,7 +392,12 @@ export default function MyVideosPage() {
 
       <div className="max-w-screen-xl mx-auto px-4 py-8">
         <div className="flex items-center justify-between mb-8">
-          <h1 className="text-2xl font-bold text-slate-800">내 동영상</h1>
+          <div className="flex items-baseline gap-3">
+            <h1 className="text-2xl font-bold text-slate-800">내 동영상</h1>
+            {subscriberCount !== null && (
+              <span className="text-sm text-slate-500">구독자 <span className="font-semibold text-sky-600">{formatKorean(subscriberCount)}</span>명</span>
+            )}
+          </div>
           <Link
             href="/upload"
             className="flex items-center gap-2 bg-sky-500 hover:bg-sky-600 text-white text-sm font-medium px-4 py-2 rounded-full transition-colors"
@@ -451,8 +467,8 @@ export default function MyVideosPage() {
                     <p className="text-sm text-slate-400 line-clamp-2 mb-2">{video.description}</p>
 
                     <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
-                      {!isProcessing && <span>조회수 {formatCount(video.view_count)}</span>}
-                      {!isProcessing && <span>좋아요 {formatCount(video.like_count)}</span>}
+                      {!isProcessing && <span>조회수 {formatKorean(video.view_count)}</span>}
+                      {!isProcessing && <span>좋아요 {formatKorean(video.like_count)}</span>}
                       <span>{new Date(video.created_at).toLocaleDateString('ko-KR')}</span>
                       {video.category && (
                         <span className="bg-sky-100 text-sky-600 px-2 py-0.5 rounded-full">{video.category}</span>

@@ -1,8 +1,8 @@
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-CF_STREAM_ACCOUNT_ID=your-cloudflare-account-id
-CF_STREAM_API_TOKEN=your-stream-api-token
-CF_STREAM_CUSTOMER_SUBDOMAIN=customer-xxxxxxxxxx
+BUNNY_STREAM_LIBRARY_ID=your-library-id
+BUNNY_STREAM_API_KEY=your-stream-api-key
+BUNNY_CDN_HOSTNAME=vz-xxxxxxxx-xxx.b-cdn.net
+BUNNY_WEBHOOK_SECRET=your-webhook-secret
 ALLOWED_ORIGINS=http://localhost:3000
-CF_STREAM_WEBHOOK_SECRET=your-webhook-secret

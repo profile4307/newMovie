@@ -25,9 +25,15 @@ function timeAgo(dateStr: string): string {
   return months < 12 ? `${months}개월 전` : `${Math.floor(months / 12)}년 전`
 }
 
-function formatCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+function formatKorean(n: number): string {
+  if (n >= 10000) {
+    const v = n / 10000
+    return (Number.isInteger(v) ? String(v) : v.toFixed(1)) + '만'
+  }
+  if (n >= 1000) {
+    const v = n / 1000
+    return (Number.isInteger(v) ? String(v) : v.toFixed(1)) + '천'
+  }
   return String(n)
 }
 
@@ -58,7 +64,7 @@ function SmallVideoCard({ video }: { video: ChannelGroup['videos'][0] }) {
         {video.title}
       </p>
       <p className="text-xs text-slate-400 mt-0.5">
-        조회수 {formatCount(video.view_count)} · {timeAgo(video.created_at)}
+        조회수 {formatKorean(video.view_count)} · {timeAgo(video.created_at)}
       </p>
     </Link>
   )

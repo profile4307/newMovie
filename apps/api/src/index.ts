@@ -12,13 +12,11 @@ export type Env = {
   SUPABASE_URL: string
   SUPABASE_ANON_KEY: string
   SUPABASE_SERVICE_ROLE_KEY: string
-  CF_STREAM_ACCOUNT_ID: string
-  CF_STREAM_API_TOKEN: string
-  CF_STREAM_CUSTOMER_SUBDOMAIN: string
+  BUNNY_STREAM_LIBRARY_ID: string
+  BUNNY_STREAM_API_KEY: string
+  BUNNY_CDN_HOSTNAME: string
+  BUNNY_WEBHOOK_SECRET?: string
   ALLOWED_ORIGINS: string
-  CF_STREAM_WEBHOOK_SECRET?: string
-  // VIEW_COUNTS: KVNamespace
-  // VIDEO_BUCKET: R2Bucket
 }
 
 const app = new Hono<{ Bindings: Env }>()

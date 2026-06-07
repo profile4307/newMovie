@@ -65,4 +65,66 @@ app.post(
   }
 )
 
+// 프로필 사진 업로드 (Supabase Storage)
+app.post('/avatar', requireAuth, async (c) => {
+  const userId = c.get('userId')
+
+  let formData: FormData
+  try {
+    formData = await c.req.formData()
+  } catch {
+    return c.json({ error: '파일 데이터를 읽을 수 없습니다' }, 400)
+  }
+
+  const file = formData.get('file') as Blob | null
+  if (!file) {
+    return c.json({ error: '파일이 없습니다' }, 400)
+  }
+
+  // 파일 검증
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+  if (!allowedTypes.includes(file.type)) {
+    return c.json({ error: 'JPG, PNG, WEBP, GIF만 업로드 가능합니다' }, 400)
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    return c.json({ error: '파일 크기는 2MB 이하여야 합니다' }, 400)
+  }
+
+  const ext = file.type.split('/')[1]
+  const path = `${userId}.${ext}`
+  const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = c.env
+
+  // Supabase Storage에 업로드 (upsert)
+  const uploadRes = await fetch(
+    `${SUPABASE_URL}/storage/v1/object/avatars/${path}`,
+    {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type': file.type,
+        'x-upsert': 'true',
+      },
+      body: await file.arrayBuffer(),
+    }
+  )
+
+  if (!uploadRes.ok) {
+    const err = await uploadRes.text()
+    return c.json({ error: `업로드 실패: ${err}` }, 500)
+  }
+
+  const avatarUrl = `${SUPABASE_URL}/storage/v1/object/public/avatars/${path}`
+
+  // users 테이블 업데이트
+  const db = createSupabaseClient(c.env)
+  const { error } = await db.query(`/users?id=eq.${userId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ avatar_url: avatarUrl }),
+  })
+  if (error) return c.json({ error }, 500)
+
+  return c.json({ avatar_url: avatarUrl })
+})
+
 export { app as auth }

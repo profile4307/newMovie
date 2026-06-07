@@ -56,13 +56,13 @@ export function UploadForm() {
     setError('')
 
     try {
-      // 1. 업로드 URL 발급
+      // 1. Bunny 비디오 ID + tus 인증 정보 발급
       setState('uploading')
       setProgress(0)
-      const { uploadUrl, streamUid } = await api.upload.getStreamUrl()
+      const { streamUid, tusSignature, tusExpiry, tusLibraryId } = await api.upload.getStreamUrl()
 
-      // 2. Cloudflare Stream으로 파일 업로드 (진행률 표시)
-      await uploadWithProgress(selectedFile, uploadUrl)
+      // 2. tus 프로토콜로 Bunny Stream에 직접 업로드
+      await uploadViaTus(selectedFile, { streamUid, tusSignature, tusExpiry, tusLibraryId })
 
       // 3. DB에 저장 (status: processing — 트랜스코딩 완료 전)
       setState('saving')
@@ -74,7 +74,7 @@ export function UploadForm() {
         visibility,
       })
 
-      // 4. 완료 → 홈으로 이동
+      // 4. 완료 → 내 동영상으로 이동
       setState('done')
       router.push('/my-videos')
     } catch (err) {
@@ -84,21 +84,33 @@ export function UploadForm() {
     }
   }
 
-  async function uploadWithProgress(file: File, uploadUrl: string) {
+  async function uploadViaTus(
+    file: File,
+    opts: { streamUid: string; tusSignature: string; tusExpiry: number; tusLibraryId: string }
+  ) {
+    const { Upload } = await import('tus-js-client')
     return new Promise<void>((resolve, reject) => {
-      const xhr = new XMLHttpRequest()
-      xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100))
+      const upload = new Upload(file, {
+        endpoint: 'https://video.bunnycdn.com/tusupload',
+        retryDelays: [0, 1000, 3000, 5000],
+        headers: {
+          AuthorizationSignature: opts.tusSignature,
+          AuthorizationExpire: String(opts.tusExpiry),
+          VideoId: opts.streamUid,
+          LibraryId: opts.tusLibraryId,
+        },
+        metadata: {
+          filename: file.name,
+          filetype: file.type,
+        },
+        chunkSize: 5 * 1024 * 1024, // 5MB 청크
+        onProgress(bytesUploaded, bytesTotal) {
+          setProgress(Math.round((bytesUploaded / bytesTotal) * 100))
+        },
+        onSuccess() { resolve() },
+        onError(err) { reject(err) },
       })
-      xhr.addEventListener('load', () => {
-        if (xhr.status >= 200 && xhr.status < 300) resolve()
-        else reject(new Error(`업로드 실패 (${xhr.status})`))
-      })
-      xhr.addEventListener('error', () => reject(new Error('네트워크 오류가 발생했습니다')))
-      xhr.open('POST', uploadUrl)
-      const fd = new FormData()
-      fd.append('file', file)
-      xhr.send(fd)
+      upload.start()
     })
   }
 

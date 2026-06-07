@@ -110,6 +110,7 @@ export const api = {
   },
   channels: {
     get: (id: string) => request<{ data: Channel }>(`/api/channels/${id}`),
+    mine: () => request<{ data: Channel | null }>('/api/channels/mine'),
     videos: (id: string) => request<{ data: Video[] }>(`/api/channels/${id}/videos`),
     create: (body: { name: string; description: string }) =>
       request<{ data: Channel }>('/api/channels', { method: 'POST', body: JSON.stringify(body) }),
@@ -118,9 +119,10 @@ export const api = {
   },
   upload: {
     getStreamUrl: () =>
-      request<{ uploadUrl: string; streamUid: string }>('/api/upload/stream-url', {
-        method: 'POST',
-      }),
+      request<{ streamUid: string; tusSignature: string; tusExpiry: number; tusLibraryId: string }>(
+        '/api/upload/stream-url',
+        { method: 'POST' }
+      ),
     getStatus: (uid: string) =>
       request<{ uid: string; state: string; pctComplete: string; duration: number; thumbnail: string }>(
         `/api/upload/stream-status/${uid}`
@@ -137,5 +139,21 @@ export const api = {
     me: () => request<{ data: { id: string; username: string; avatar_url: string | null } }>('/api/auth/me'),
     createProfile: (username: string) =>
       request('/api/auth/profile', { method: 'POST', body: JSON.stringify({ username }) }),
+    uploadAvatar: async (file: File): Promise<{ avatar_url: string }> => {
+      const authHeaders = await getAuthHeaders()
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch(`${API_URL}/api/auth/avatar`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: form,
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }))
+        const raw = (err as { error: unknown }).error
+        throw new Error(typeof raw === 'string' ? raw : JSON.stringify(raw))
+      }
+      return res.json() as Promise<{ avatar_url: string }>
+    },
   },
 }

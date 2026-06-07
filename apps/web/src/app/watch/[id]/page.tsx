@@ -9,11 +9,17 @@ import { ShareButton } from '@/components/video/ShareButton'
 import { VideoActions } from '@/components/video/VideoActions'
 import { api, type Video } from '@/lib/api'
 
-const CF_SUBDOMAIN = process.env.NEXT_PUBLIC_CF_STREAM_CUSTOMER_SUBDOMAIN ?? 'customer-subdomain'
+const CF_SUBDOMAIN = process.env.NEXT_PUBLIC_BUNNY_CDN_HOSTNAME ?? process.env.NEXT_PUBLIC_CF_STREAM_CUSTOMER_SUBDOMAIN ?? 'cdn-hostname'
 
-function formatCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+function formatKorean(n: number): string {
+  if (n >= 10000) {
+    const v = n / 10000
+    return (Number.isInteger(v) ? String(v) : v.toFixed(1)) + '만'
+  }
+  if (n >= 1000) {
+    const v = n / 1000
+    return (Number.isInteger(v) ? String(v) : v.toFixed(1)) + '천'
+  }
   return String(n)
 }
 function formatDuration(s: number | null): string {
@@ -55,7 +61,7 @@ function RelatedCard({ video }: { video: Video }) {
           {video.title}
         </p>
         <p className="text-xs text-slate-500 mt-1">{video.channel?.name}</p>
-        <p className="text-xs text-slate-400">조회수 {formatCount(video.view_count)} · {timeAgo(video.created_at)}</p>
+        <p className="text-xs text-slate-400">조회수 {formatKorean(video.view_count)} · {timeAgo(video.created_at)}</p>
       </div>
     </Link>
   )
@@ -175,7 +181,7 @@ export default function WatchPage() {
               {/* 설명 */}
               <div className="mt-4 pt-4 border-t border-sky-100">
                 <p className="text-sm text-slate-500 mb-2">
-                  조회수 {formatCount(video.view_count)}회 · {new Date(video.created_at).toLocaleDateString('ko-KR')}
+                  조회수 {formatKorean(video.view_count)}회 · {new Date(video.created_at).toLocaleDateString('ko-KR')}
                 </p>
                 {video.description && (
                   <p className="text-sm text-slate-700 whitespace-pre-wrap">{video.description}</p>

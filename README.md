@@ -6,26 +6,27 @@
 
 | 영역 | 기술 | 비용 |
 |------|------|------|
-| 프론트엔드 | Next.js 14 (App Router) + Tailwind CSS | 무료 |
+| 프론트엔드 | Next.js 16 (App Router) + Tailwind CSS | 무료 |
 | 호스팅 | Cloudflare Pages | 무료 |
 | API 서버 | Cloudflare Workers + Hono.js | 무료 (100k req/일) |
 | 데이터베이스 | Supabase (PostgreSQL + RLS) | 무료 ~ $25/월 |
 | 인증 | Supabase Auth | 무료 |
-| 동영상 저장/전송 | Cloudflare Stream | $5/1,000분 저장 + $1/1,000분 시청 |
-
-> AWS + VPS 대비 동등 트래픽에서 약 70~80% 비용 절감. Cloudflare R2를 통한 egress 비용 0원.
+| 프로필 사진 | Supabase Storage | 무료 (1GB) |
+| 동영상 저장/전송 | Bunny Stream | ~$0.005/1,000분 저장 + $0.009~$0.045/GB 전송 |
 
 ## 주요 기능
 
-- **동영상 업로드** — Cloudflare Stream 직접 업로드, 자동 트랜스코딩(360p~1080p), HLS 스트리밍
+- **동영상 업로드** — Bunny Stream tus 직접 업로드, 자동 트랜스코딩, HLS 스트리밍
+- **공개 설정** — 전체공개 / 일부공개(링크 공유) / 비공개, 업로드 및 이후 변경 가능
 - **추천 피드** — 시간 가중 좋아요 점수 기반 정렬 (`총점 = Σ daily_likes × (10 - 경과일)`)
 - **구독 피드** — 구독 채널의 최신 영상을 업로드 시간 역순으로 표시
 - **멀티 키워드 검색** — 띄어쓰기로 여러 단어 AND 검색, title + description + tags FTS
 - **관련 영상 추천** — 현재 영상의 태그 기반 FTS, 없으면 같은 카테고리 최신 영상
 - **영상 공유** — 링크 복사, X(트위터), Facebook 공유
-- **채널 / 구독** — 채널 생성, 구독 토글 (race condition 방지 DB 함수)
-- **댓글** — 대댓글 지원
-- **글로벌 CDN** — Cloudflare 300+ PoP 자동 적용
+- **채널 / 구독** — 채널 생성, 구독 토글, 구독자수 표시 (한국식 단위: 천/만)
+- **내 동영상 관리** — 수정, 삭제, 공개 설정 변경, 트랜스코딩 상태 확인
+- **프로필 사진 변경** — 헤더 아바타 클릭으로 Supabase Storage에 직접 업로드
+- **댓글** — 영상별 댓글 작성/삭제
 
 ## 시작하기
 
@@ -34,7 +35,7 @@
 - Node.js 20+
 - pnpm 8+
 - [Supabase](https://supabase.com) 계정
-- [Cloudflare](https://cloudflare.com) 계정 (Stream 활성화 필요)
+- [Bunny.net](https://bunny.net) 계정 (Stream 라이브러리 생성 필요)
 
 ### 1. 설치
 
@@ -44,18 +45,36 @@ cd newMovie
 pnpm install --ignore-scripts
 ```
 
-> `--ignore-scripts` 필수 — Windows 환경에서 `sharp`, `unrs-resolver` 빌드 스크립트 충돌
+> `--ignore-scripts` 필수 — `sharp`, `unrs-resolver` 빌드 스크립트 충돌 방지
 
 ### 2. 데이터베이스 설정
 
 Supabase 대시보드 → SQL 에디터에서 [`packages/db/schema.sql`](packages/db/schema.sql) 전체를 실행합니다.
 
 생성되는 항목:
-- 테이블: `users`, `channels`, `videos`, `likes`, `video_daily_likes`, `subscriptions`, `comments`, `reports`
+- 테이블: `users`, `channels`, `videos`, `likes`, `video_daily_likes`, `subscriptions`, `comments`
 - RLS 정책 (모든 테이블)
-- RPC 함수: `toggle_like`, `toggle_subscription`, `increment_view_count`, `get_trending_videos`, `get_subscription_feed`, `search_videos`, `get_related_videos`
+- RPC 함수: `toggle_like`, `toggle_subscription`, `increment_view_count`, `get_trending_videos`, `get_subscription_feed`, `get_subscription_feed_by_channel`, `search_videos`, `get_related_videos`
 
-### 3. 환경변수 설정
+**프로필 사진 Storage 설정** — Supabase 대시보드 → Storage → New bucket:
+- Bucket name: `avatars`, Public bucket: **체크**
+
+그 후 SQL 에디터에서 실행:
+```sql
+create policy "공개 읽기" on storage.objects for select using (bucket_id = 'avatars');
+create policy "인증 사용자 업로드" on storage.objects for insert to authenticated with check (bucket_id = 'avatars');
+create policy "본인 파일 수정" on storage.objects for update to authenticated using (bucket_id = 'avatars');
+```
+
+### 3. Bunny Stream 설정
+
+1. [bunny.net](https://bunny.net) → **Stream** → **Add Video Library** 생성
+2. **Library ID** 확인 (숫자)
+3. **API Key** 탭에서 Stream API Key 복사
+4. 생성된 **Pull Zone** 호스트명 확인 (예: `vz-xxxx.b-cdn.net`)
+5. Stream 라이브러리 → **Security** → **Block direct url file access** **비활성화** (썸네일/영상 403 방지)
+
+### 4. 환경변수 설정
 
 **프론트엔드** — `apps/web/.env.local` 생성:
 
@@ -63,7 +82,7 @@ Supabase 대시보드 → SQL 에디터에서 [`packages/db/schema.sql`](package
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 NEXT_PUBLIC_API_URL=http://localhost:8787
-CF_STREAM_CUSTOMER_SUBDOMAIN=your-customer-subdomain
+NEXT_PUBLIC_BUNNY_CDN_HOSTNAME=vz-xxxx.b-cdn.net
 ```
 
 **API** — `apps/api/.dev.vars` 생성:
@@ -72,15 +91,14 @@ CF_STREAM_CUSTOMER_SUBDOMAIN=your-customer-subdomain
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-CF_STREAM_ACCOUNT_ID=your-cloudflare-account-id
-CF_STREAM_API_TOKEN=your-stream-api-token
-CF_STREAM_CUSTOMER_SUBDOMAIN=your-customer-subdomain
+BUNNY_STREAM_LIBRARY_ID=your-library-id
+BUNNY_STREAM_API_KEY=your-stream-api-key
+BUNNY_CDN_HOSTNAME=vz-xxxx.b-cdn.net
+BUNNY_WEBHOOK_SECRET=your-webhook-secret
 ALLOWED_ORIGINS=http://localhost:3000
 ```
 
-> `CF_STREAM_CUSTOMER_SUBDOMAIN`은 Cloudflare Stream 대시보드 → 동영상 선택 → "Use Stream Player" 섹션에서 확인
-
-### 4. 개발 서버 실행
+### 5. 개발 서버 실행
 
 ```bash
 # 터미널 1 — API (http://localhost:8787)
@@ -99,7 +117,7 @@ cd apps/api
 npx wrangler deploy
 ```
 
-Cloudflare 대시보드 → Workers → 해당 Worker → Settings → Variables에서 환경변수를 등록합니다.
+Cloudflare 대시보드 → Workers → 해당 Worker → Settings → Variables에서 프로덕션 환경변수를 등록합니다.
 
 ### Cloudflare Pages (프론트엔드)
 
@@ -139,22 +157,28 @@ newMovie/
 | 메서드 | 경로 | 설명 | 인증 |
 |--------|------|------|------|
 | GET | `/api/videos` | 동영상 목록 (feed, search, category, page) | - |
+| GET | `/api/videos/mine` | 내 동영상 목록 (processing 포함) | ✅ |
 | GET | `/api/videos/:id` | 동영상 상세 | - |
 | GET | `/api/videos/:id/related` | 관련 영상 | - |
 | POST | `/api/videos` | 동영상 등록 | ✅ |
 | PUT | `/api/videos/:id` | 동영상 수정 | ✅ |
+| DELETE | `/api/videos/:id` | 동영상 삭제 | ✅ |
 | POST | `/api/videos/:id/like` | 좋아요 토글 | ✅ |
+| GET | `/api/videos/subscription-by-channel` | 구독 피드 (채널별 그룹) | ✅ |
+| GET | `/api/channels/mine` | 내 채널 조회 | ✅ |
 | GET | `/api/channels/:id` | 채널 조회 | - |
 | GET | `/api/channels/:id/videos` | 채널 동영상 목록 | - |
 | POST | `/api/channels` | 채널 생성 | ✅ |
-| POST | `/api/channels/:id/subscribe` | 구독 토글 | ✅ |
-| POST | `/api/upload/stream-url` | 업로드 URL 발급 | ✅ |
-| GET | `/api/upload/stream-status/:uid` | 트랜스코딩 상태 | ✅ |
+| POST | `/api/channels/:id/subscribe` | 구독 토글 (본인 채널 불가) | ✅ |
+| POST | `/api/upload/stream-url` | Bunny tus 인증 정보 발급 | ✅ |
+| GET | `/api/upload/stream-status/:uid` | 트랜스코딩 상태 확인 | ✅ |
+| POST | `/api/upload/webhook` | Bunny 웹훅 (트랜스코딩 완료) | - |
 | GET | `/api/comments?video_id=` | 댓글 목록 | - |
 | POST | `/api/comments` | 댓글 작성 | ✅ |
 | DELETE | `/api/comments/:id` | 댓글 삭제 | ✅ |
 | GET | `/api/auth/me` | 내 프로필 | ✅ |
 | POST | `/api/auth/profile` | 프로필 생성/수정 | ✅ |
+| POST | `/api/auth/avatar` | 프로필 사진 업로드 | ✅ |
 
 피드 파라미터: `?feed=trending` (기본) / `?feed=subscriptions` / `?feed=latest`
 
@@ -168,7 +192,9 @@ newMovie/
 
 ## 비용 추정
 
-| 단계 | MAU | 예상 월 비용 |
+Bunny Stream 기준. 전송 단가는 지역별로 다름 (유럽/미국 $0.009/GB, 아시아-태평양 $0.045/GB).
+
+| 단계 | MAU | 예상 월 비용 (한국 기준) |
 |------|-----|-------------|
-| 초기 | 1,000명 | ~$7 |
-| 성장 | 50,000명 | ~$155 |
+| 초기 | 1,000명 | ~$5 ~ $20 |
+| 성장 | 10,000명 | ~$50 ~ $200 |

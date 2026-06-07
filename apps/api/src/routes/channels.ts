@@ -15,6 +15,20 @@ function isUUID(v: string) {
   return UUID_RE.test(v)
 }
 
+// 내 채널 조회 (/:id 앞에 위치해야 함)
+app.get('/mine', requireAuth, async (c) => {
+  const userId = c.get('userId')
+  const db = createSupabaseClient(c.env)
+
+  const { data, error } = await db.query<unknown[]>(
+    `/channels?select=id,name,description,avatar_url,banner_url,subscriber_count,created_at&owner_id=eq.${userId}&limit=1`
+  )
+
+  if (error) return c.json({ error }, 500)
+  if (!data || data.length === 0) return c.json({ data: null })
+  return c.json({ data: data[0] })
+})
+
 // 채널 조회
 app.get('/:id', async (c) => {
   const id = c.req.param('id')
@@ -84,6 +98,14 @@ app.post('/:id/subscribe', requireAuth, async (c) => {
 
   const userId = c.get('userId')
   const db = createSupabaseClient(c.env)
+
+  // 본인 채널 구독 방지
+  const { data: ch } = await db.query<{ owner_id: string }[]>(
+    `/channels?select=owner_id&id=eq.${channelId}&limit=1`
+  )
+  if (ch && ch.length > 0 && ch[0]!.owner_id === userId) {
+    return c.json({ error: '본인 채널은 구독할 수 없습니다' }, 400)
+  }
 
   const { data, error } = await db.rpc<boolean>('toggle_subscription', {
     p_user_id: userId,

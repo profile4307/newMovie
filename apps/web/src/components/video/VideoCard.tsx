@@ -2,9 +2,15 @@ import Link from 'next/link'
 import Image from 'next/image'
 import type { Video } from '@/lib/api'
 
-function formatCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+function formatKorean(n: number): string {
+  if (n >= 10000) {
+    const v = n / 10000
+    return (Number.isInteger(v) ? String(v) : v.toFixed(1)) + '만'
+  }
+  if (n >= 1000) {
+    const v = n / 1000
+    return (Number.isInteger(v) ? String(v) : v.toFixed(1)) + '천'
+  }
   return String(n)
 }
 
@@ -68,7 +74,7 @@ export function VideoCard({ video }: Props) {
           </h3>
           <p className="text-slate-500 text-xs mt-0.5">{video.channel.name}</p>
           <p className="text-slate-400 text-xs">
-            조회수 {formatCount(video.view_count)} · {timeAgo(video.created_at)}
+            조회수 {formatKorean(video.view_count)} · {timeAgo(video.created_at)}
           </p>
         </div>
       </div>

@@ -332,11 +332,11 @@ app.delete('/:id', requireAuth, async (c) => {
   const { error } = await db.query(`/videos?id=eq.${id}`, { method: 'DELETE' })
   if (error) return c.json({ error }, 500)
 
-  // Cloudflare Stream에서도 삭제 (비동기 — 실패해도 무관)
+  // Bunny Stream에서도 삭제 (비동기 — 실패해도 무관)
   c.executionCtx.waitUntil(
     fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_STREAM_ACCOUNT_ID}/stream/${streamUid}`,
-      { method: 'DELETE', headers: { Authorization: `Bearer ${c.env.CF_STREAM_API_TOKEN}` } }
+      `https://video.bunnycdn.com/library/${c.env.BUNNY_STREAM_LIBRARY_ID}/videos/${streamUid}`,
+      { method: 'DELETE', headers: { AccessKey: c.env.BUNNY_STREAM_API_KEY } }
     )
   )
 
