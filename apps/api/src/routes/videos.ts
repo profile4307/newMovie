@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { Env } from '../index'
 import { requireAuth, AuthVariables } from '../middleware/auth'
 import { createSupabaseClient } from '../lib/supabase'
+import { attachChannels } from '../lib/channels'
 
 type Variables = AuthVariables
 
@@ -13,35 +14,6 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 function isUUID(v: string) {
   return UUID_RE.test(v)
-}
-
-// 채널 정보를 video 배열에 병합
-async function attachChannels<T extends { channel_id: string }>(
-  db: ReturnType<typeof createSupabaseClient>,
-  videos: T[]
-): Promise<(T & { channel: { id: string; name: string; avatar_url: string | null } })[]> {
-  if (videos.length === 0) return []
-  const ids = [...new Set(videos.map((v) => v.channel_id))]
-  const inFilter = ids.map((id) => `"${id}"`).join(',')
-  const { data: channels } = await db.query<
-    { id: string; name: string; avatar_url: string | null; owner: { avatar_url: string | null } | null }[]
-  >(`/channels?select=id,name,avatar_url,owner:users!owner_id(avatar_url)&id=in.(${inFilter})`)
-
-  const channelMap = Object.fromEntries(
-    (channels ?? []).map((c) => [
-      c.id,
-      {
-        id: c.id,
-        name: c.name,
-        // channel avatar 없으면 채널 소유자의 user avatar로 fallback
-        avatar_url: c.avatar_url || c.owner?.avatar_url || null,
-      },
-    ])
-  )
-  return videos.map((v) => ({
-    ...v,
-    channel: channelMap[v.channel_id] ?? { id: v.channel_id, name: '', avatar_url: null },
-  }))
 }
 
 // ─── 동영상 목록 (피드) ──────────────────────────────────────────────────────
@@ -84,7 +56,7 @@ app.get(
 
       const { data, error } = await db.rpc<
         { id: string; title: string; description: string; thumbnail_url: string | null; stream_uid: string; duration: number | null; view_count: number; like_count: number; category: string | null; tags: string[]; created_at: string; channel_id: string }[]
-      >('get_subscription_feed', { p_user_id: userId, p_limit: 200, p_offset: offset })
+      >('get_subscription_feed', { p_user_id: userId, p_limit: limit, p_offset: offset })
       if (error) return c.json({ error }, 500)
       const withChannels = await attachChannels(db, data ?? [])
       return c.json({ data: withChannels, feed, page, limit })
@@ -210,10 +182,7 @@ app.get('/:id', async (c) => {
     if (!isOwner) return c.json({ error: 'Not found' }, 404)
   }
 
-  // 공개 영상만 조회수 증가
-  if (video.status === 'published') {
-    c.executionCtx.waitUntil(db.rpc('increment_view_count', { p_video_id: id }))
-  }
+  // 조회수 증가는 GET에서 분리됨 → POST /:id/view (클라이언트가 하루 1회만 호출)
 
   // owner_id 제외, avatar_url 없으면 소유자 users.avatar_url로 fallback
   const { channel: { owner_id: _, owner, ...channelRest }, ...videoPublic } = video
@@ -237,6 +206,16 @@ app.get('/:id/related', async (c) => {
   if (error) return c.json({ error }, 500)
   const withChannels = await attachChannels(db, data ?? [])
   return c.json({ data: withChannels })
+})
+
+// ─── 조회수 증가 (클라이언트가 하루 1회만 호출) ─────────────────────────────
+app.post('/:id/view', async (c) => {
+  const id = c.req.param('id')
+  if (!isUUID(id)) return c.json({ error: 'Invalid ID' }, 400)
+
+  const db = createSupabaseClient(c.env)
+  c.executionCtx.waitUntil(db.rpc('increment_view_count', { p_video_id: id }))
+  return c.json({ ok: true })
 })
 
 // ─── 동영상 등록 (메타데이터) ────────────────────────────────────────────────
