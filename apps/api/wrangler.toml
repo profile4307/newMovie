@@ -5,11 +5,19 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 ENVIRONMENT = "development"
+FEED_CACHE_TTL_MINUTES = "30"   # 캐시 갱신 주기(분) — [triggers].crons 와 함께 수정
+FEED_CACHE_SIZE = "50"           # 캐시할 영상 수 (카테고리 필터 여유분)
 
-# KV namespace for view count caching
-# [[kv_namespaces]]
-# binding = "VIEW_COUNTS"
-# id = "YOUR_KV_NAMESPACE_ID"
+# KV namespace for feed caching
+# 처음 설정 시: npx wrangler kv namespace create FEED_CACHE
+# 출력된 id를 아래에 입력
+[[kv_namespaces]]
+binding = "FEED_CACHE"
+id = ""          # wrangler kv namespace create FEED_CACHE 실행 후 입력
+id_preview = ""  # wrangler kv namespace create FEED_CACHE --preview 실행 후 입력
+
+[triggers]
+crons = ["*/30 * * * *"]   # FEED_CACHE_TTL_MINUTES 변경 시 함께 수정
 
 # R2 bucket for original video storage
 # [[r2_buckets]]
