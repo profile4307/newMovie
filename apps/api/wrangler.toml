@@ -13,8 +13,8 @@ FEED_CACHE_SIZE = "50"           # 캐시할 영상 수 (카테고리 필터 여
 # 출력된 id를 아래에 입력
 [[kv_namespaces]]
 binding = "FEED_CACHE"
-id = "replace-with-real-kv-id"          # npx wrangler kv namespace create FEED_CACHE 후 출력된 id 입력
-preview_id = "replace-with-real-kv-preview-id"  # npx wrangler kv namespace create FEED_CACHE --preview 후 입력
+id = "9ff83ad4e18c46eeaaa353871e2a2cb6"          # 프로덕션 KV
+preview_id = "d24fb193878a43e39ab6b4778f24717f"  # 로컬 개발(wrangler dev)용 preview KV
 
 [triggers]
 crons = ["*/30 * * * *"]   # FEED_CACHE_TTL_MINUTES 변경 시 함께 수정
