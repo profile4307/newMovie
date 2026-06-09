@@ -37,7 +37,9 @@ export async function refreshFeedCache(env: Env): Promise<void> {
     'get_trending_videos',
     { p_limit: size, p_offset: 0 }
   )
-  if (!tErr && trendingRaw && trendingRaw.length > 0) {
+  if (tErr) {
+    console.error('[feed-cache] trending 갱신 실패:', tErr)
+  } else if (trendingRaw && trendingRaw.length > 0) {
     const trending = await attachChannels(db, trendingRaw)
     const payload: CachedFeed = { data: trending, cachedAt: new Date().toISOString() }
     await env.FEED_CACHE.put('feed:trending', JSON.stringify(payload), {
@@ -49,7 +51,9 @@ export async function refreshFeedCache(env: Env): Promise<void> {
   const { data: latestRaw, error: lErr } = await db.query<FeedVideoRow[]>(
     `/videos?select=id,title,description,thumbnail_url,stream_uid,duration,view_count,like_count,category,tags,created_at,channel_id&status=eq.published&order=created_at.desc&limit=${size}&offset=0`
   )
-  if (!lErr && latestRaw && latestRaw.length > 0) {
+  if (lErr) {
+    console.error('[feed-cache] latest 갱신 실패:', lErr)
+  } else if (latestRaw && latestRaw.length > 0) {
     const latest = await attachChannels(db, latestRaw)
     const payload: CachedFeed = { data: latest, cachedAt: new Date().toISOString() }
     await env.FEED_CACHE.put('feed:latest', JSON.stringify(payload), {
