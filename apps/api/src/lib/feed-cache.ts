@@ -27,6 +27,10 @@ export interface CachedFeed {
 }
 
 export async function refreshFeedCache(env: Env): Promise<void> {
+  if (!env.FEED_CACHE) {
+    console.warn('[feed-cache] FEED_CACHE KV 바인딩이 없음 — 캐시 갱신 스킵')
+    return
+  }
   const db = createSupabaseClient(env)
   const size = parseInt(env.FEED_CACHE_SIZE ?? '50', 10)
   const ttlMinutes = parseInt(env.FEED_CACHE_TTL_MINUTES ?? '30', 10)

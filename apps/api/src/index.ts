@@ -23,8 +23,8 @@ export type Env = {
   BUNNY_STORAGE_HOSTNAME: string
   BUNNY_STORAGE_ENDPOINT?: string
   ALLOWED_ORIGINS: string
-  // Feed cache
-  FEED_CACHE: KVNamespace
+  // Feed cache (optional — KV 미설정 시 DB 폴백)
+  FEED_CACHE?: KVNamespace
   FEED_CACHE_TTL_MINUTES: string
   FEED_CACHE_SIZE: string
 }
