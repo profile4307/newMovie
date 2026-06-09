@@ -21,14 +21,14 @@ export default function UploadPage() {
 
   if (checking) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-sky-50 flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-sky-400 border-t-transparent rounded-full animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-950">
+    <div className="min-h-screen bg-sky-50">
       <UploadForm />
     </div>
   )

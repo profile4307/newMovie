@@ -58,6 +58,55 @@ app.post('/stream-url', requireAuth, async (c) => {
   })
 })
 
+// 썸네일 업로드 (Supabase Storage)
+app.post('/thumbnail', requireAuth, async (c) => {
+  const userId = c.get('userId')
+
+  let formData: FormData
+  try {
+    formData = await c.req.formData()
+  } catch {
+    return c.json({ error: '파일 데이터를 읽을 수 없습니다' }, 400)
+  }
+
+  const file = formData.get('file') as Blob | null
+  if (!file) return c.json({ error: '파일이 없습니다' }, 400)
+
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp']
+  if (!allowedTypes.includes(file.type)) {
+    return c.json({ error: 'JPG, PNG, WEBP만 업로드 가능합니다' }, 400)
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    return c.json({ error: '파일 크기는 5MB 이하여야 합니다' }, 400)
+  }
+
+  const ext = file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1]
+  const path = `${userId}_${Date.now()}.${ext}`
+  const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = c.env
+
+  const uploadRes = await fetch(
+    `${SUPABASE_URL}/storage/v1/object/thumbnails/${path}`,
+    {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type': file.type,
+        'x-upsert': 'true',
+      },
+      body: await file.arrayBuffer(),
+    }
+  )
+
+  if (!uploadRes.ok) {
+    const err = await uploadRes.text()
+    return c.json({ error: `업로드 실패: ${err}` }, 500)
+  }
+
+  const thumbnail_url = `${SUPABASE_URL}/storage/v1/object/public/thumbnails/${path}`
+  return c.json({ thumbnail_url })
+})
+
 // 트랜스코딩 상태 확인
 app.get('/stream-status/:uid', requireAuth, async (c) => {
   const uid = c.req.param('uid')
@@ -82,20 +131,23 @@ app.get('/stream-status/:uid', requireAuth, async (c) => {
   // 트랜스코딩 완료 시 target_status로 전환
   if (state === 'ready') {
     const db = createSupabaseClient(c.env)
-    const { data: videos } = await db.query<{ target_status: string }[]>(
-      `/videos?select=target_status&stream_uid=eq.${uid}&limit=1`
+    const { data: videos } = await db.query<{ target_status: string; thumbnail_url: string | null }[]>(
+      `/videos?select=target_status,thumbnail_url&stream_uid=eq.${uid}&limit=1`
     )
     const targetStatus = videos?.[0]?.target_status ?? 'published'
-    const thumbnailUrl = video.thumbnailFileName
+    // 사용자가 직접 업로드한 썸네일이 있으면 Bunny 자동 썸네일로 덮어쓰지 않음
+    const existingThumbnail = videos?.[0]?.thumbnail_url
+    const bunnyThumbnail = video.thumbnailFileName
       ? `https://${c.env.BUNNY_CDN_HOSTNAME}/${uid}/${video.thumbnailFileName}`
       : undefined
+    const thumbnailUrl = existingThumbnail ?? bunnyThumbnail
 
     await db.query(`/videos?stream_uid=eq.${uid}`, {
       method: 'PATCH',
       body: JSON.stringify({
         status: targetStatus,
         duration: video.length ? Math.floor(video.length) : undefined,
-        thumbnail_url: thumbnailUrl,
+        ...(thumbnailUrl ? { thumbnail_url: thumbnailUrl } : {}),
       }),
     })
   }
@@ -147,16 +199,18 @@ app.post('/webhook', async (c) => {
     }
 
     const db = createSupabaseClient(c.env)
-    const { data: videos } = await db.query<{ target_status: string }[]>(
-      `/videos?select=target_status&stream_uid=eq.${uid}&limit=1`
+    const { data: videos } = await db.query<{ target_status: string; thumbnail_url: string | null }[]>(
+      `/videos?select=target_status,thumbnail_url&stream_uid=eq.${uid}&limit=1`
     )
     const targetStatus = videos?.[0]?.target_status ?? 'published'
+    // 사용자가 직접 업로드한 썸네일이 있으면 Bunny 자동 썸네일로 덮어쓰지 않음
+    const finalThumbnail = videos?.[0]?.thumbnail_url ?? thumbnailUrl
     await db.query(`/videos?stream_uid=eq.${uid}`, {
       method: 'PATCH',
       body: JSON.stringify({
         status: targetStatus,
         duration,
-        thumbnail_url: thumbnailUrl,
+        ...(finalThumbnail ? { thumbnail_url: finalThumbnail } : {}),
       }),
     })
   }

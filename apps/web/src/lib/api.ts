@@ -129,6 +129,22 @@ export const api = {
       request<{ uid: string; state: string; pctComplete: string; duration: number; thumbnail: string }>(
         `/api/upload/stream-status/${uid}`
       ),
+    uploadThumbnail: async (file: File): Promise<{ thumbnail_url: string }> => {
+      const authHeaders = await getAuthHeaders()
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch(`${API_URL}/api/upload/thumbnail`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: form,
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }))
+        const raw = (err as { error: unknown }).error
+        throw new Error(typeof raw === 'string' ? raw : JSON.stringify(raw))
+      }
+      return res.json() as Promise<{ thumbnail_url: string }>
+    },
   },
   comments: {
     list: (videoId: string, page = 1) =>

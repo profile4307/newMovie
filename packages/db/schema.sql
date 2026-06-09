@@ -510,3 +510,42 @@ returns table(
   where r.rn <= p_videos_per_channel
   order by r.latest_at desc nulls last, r.channel_id, r.created_at desc;
 $$ language sql stable security definer;
+
+
+-- =============================================
+-- Storage 버킷 설정
+-- =============================================
+
+-- avatars 버킷 (프로필 사진)
+insert into storage.buckets (id, name, public)
+values ('avatars', 'avatars', true)
+on conflict (id) do nothing;
+
+create policy "Avatar images are publicly accessible"
+  on storage.objects for select
+  using (bucket_id = 'avatars');
+
+create policy "Users can upload own avatar"
+  on storage.objects for insert
+  with check (bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1]);
+
+create policy "Users can update own avatar"
+  on storage.objects for update
+  using (bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1]);
+
+-- thumbnails 버킷 (영상 썸네일)
+insert into storage.buckets (id, name, public)
+values ('thumbnails', 'thumbnails', true)
+on conflict (id) do nothing;
+
+create policy "Thumbnail images are publicly accessible"
+  on storage.objects for select
+  using (bucket_id = 'thumbnails');
+
+create policy "Authenticated users can upload thumbnails"
+  on storage.objects for insert
+  with check (bucket_id = 'thumbnails' and auth.role() = 'authenticated');
+
+create policy "Users can update own thumbnails"
+  on storage.objects for update
+  using (bucket_id = 'thumbnails' and auth.uid()::text = split_part(name, '_', 1));
