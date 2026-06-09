@@ -9,6 +9,7 @@ import { api } from '@/lib/api'
 import type { User } from '@supabase/supabase-js'
 import { ToastContainer, useToast } from '@/components/ui/Toast'
 import { useSidebar } from '@/components/ui/SidebarContext'
+import { AvatarCropModal } from '@/components/ui/AvatarCropModal'
 
 function formatKorean(n: number): string {
   if (n >= 10000) {
@@ -29,6 +30,7 @@ export function Header() {
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined)
   const [subscriberCount, setSubscriberCount] = useState<number | null>(null)
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
+  const [cropFile, setCropFile] = useState<File | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -59,19 +61,26 @@ export function Header() {
     } catch { /* 채널 없으면 무시 */ }
   }
 
-  async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+  // 파일 선택 → 크롭 모달 열기
+  function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+    setCropFile(file)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  // 크롭 완료 → 실제 업로드
+  async function handleCropConfirm(croppedFile: File) {
+    setCropFile(null)
     setUploadingAvatar(true)
     try {
-      const res = await api.auth.uploadAvatar(file)
+      const res = await api.auth.uploadAvatar(croppedFile)
       setAvatarUrl(res.avatar_url)
       showToast('프로필 사진이 변경되었습니다', 'success')
     } catch (err) {
       showToast(err instanceof Error ? err.message : '업로드 실패', 'error')
     } finally {
       setUploadingAvatar(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
 
@@ -98,6 +107,14 @@ export function Header() {
   const displayName = (user?.user_metadata?.full_name ?? user?.user_metadata?.name ?? user?.email ?? '') as string
 
   return (
+    <>
+    {cropFile && (
+      <AvatarCropModal
+        file={cropFile}
+        onConfirm={handleCropConfirm}
+        onCancel={() => setCropFile(null)}
+      />
+    )}
     <header className="fixed top-0 left-0 right-0 z-50 h-14 bg-sky-400 text-white flex items-center px-4 gap-4 shadow-sm">
       <ToastContainer toasts={toasts} onRemove={removeToast} />
       <input
@@ -238,5 +255,6 @@ export function Header() {
         )}
       </div>
     </header>
+    </>
   )
 }

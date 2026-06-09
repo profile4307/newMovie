@@ -4,8 +4,14 @@ import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Image from 'next/image'
 import Link from 'next/link'
-import { VideoPlayer } from '@/components/video/VideoPlayer'
+import dynamic from 'next/dynamic'
 import { ShareButton } from '@/components/video/ShareButton'
+
+// hls.js는 SSR에서 실행 불가 → ssr: false로 클라이언트 전용 처리 (Turbopack 워커 크래시 방지)
+const VideoPlayer = dynamic(
+  () => import('@/components/video/VideoPlayer').then((m) => ({ default: m.VideoPlayer })),
+  { ssr: false }
+)
 import { VideoActions } from '@/components/video/VideoActions'
 import { CommentSection } from '@/components/video/CommentSection'
 import { api, type Video } from '@/lib/api'
