@@ -22,7 +22,7 @@ trending/latest 피드는 사용자별 개인화가 없고 자주 변하지 않�
 |------|------|------|
 | 캐시 스토어 | Cloudflare Workers KV | Workers 내장, 읽기 $0.50/100만으로 거의 무료 |
 | 갱신 방식 | Cloudflare Cron Trigger | DB 쿼리 횟수 완전히 예측 가능, thundering herd 없음 |
-| 카테고리 필터 | in-memory (캐시 후 필터) | KV 항목 수 최소화, 저장 비용 절감 |
+| 카테고리 필터 | in-memory (캐시 후 필터) + 부족 시 DB 폴백 | KV 항목 수 최소화, 비인기 카테고리 정상 노출 |
 | 캐시 크기 | 50개 | 20개 페이지 표시 + 카테고리 필터 여유분 |
 
 ---
@@ -95,35 +95,47 @@ export async function refreshFeedCache(env: Env): Promise<void>
    FEED_CACHE_SIZE: string
    ```
 
-2. `scheduled` 핸들러 추가:
+2. 기존 `export default app` → 객체 형태로 변경하고 `scheduled` 핸들러 추가:
    ```typescript
+   // 현재: export default app
    export default {
      fetch: app.fetch,
-     async scheduled(_: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+     // workers-types v4 모듈 워커 시그니처: 첫 인자는 ScheduledController (ScheduledEvent 아님)
+     async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
        ctx.waitUntil(refreshFeedCache(env))
-     }
+     },
    }
    ```
+   > `@cloudflare/workers-types` v4 + `tsconfig.json`의 `types: ["@cloudflare/workers-types"]` 확인됨 → `KVNamespace`, `ScheduledController`, `ExecutionContext` 타입 사용 가능.
 
 ### 수정: `apps/api/src/routes/videos.ts`
 
 `GET /` 핸들러의 trending/latest 분기에 KV 읽기 추가:
 
 ```typescript
-// trending
+// trending (latest도 'feed:latest' 키로 동일 패턴)
 if (feed === 'trending') {
   const cached = await c.env.FEED_CACHE?.get('feed:trending', 'json') as CachedFeed | null
   if (cached?.data) {
     let result = cached.data
     if (category) result = result.filter(v => v.category === category)
     const sliced = result.slice(offset, offset + limit)
-    return c.json({ data: sliced, feed, page, limit })
+
+    // DB 폴백 조건: ① 캐시 결과가 페이지를 채우지 못함(offset이 캐시 범위 밖)
+    //              ② 카테고리 필터 결과가 limit 절반 미만 (비인기 카테고리)
+    const underfilled = category && result.length < Math.ceil(limit / 2)
+    const beyondCache = offset >= result.length
+    if (!underfilled && !beyondCache) {
+      return c.json({ data: sliced, feed, page, limit })
+    }
+    // 위 조건이면 아래 기존 DB 로직으로 폴백
   }
-  // 폴백: 기존 DB 로직 유지
+  // 폴백: 기존 DB 로직 유지 (캐시 미스 / 비인기 카테고리 / page 범위 초과)
   ...
 }
-// latest도 동일 패턴 (`feed:latest` 키 사용)
 ```
+
+> **#4 동작 보존:** 현재 latest는 카테고리 필터를 DB(`&category=eq.`)에서 처리한다. 전체 캐싱 후 in-memory 필터로 바꾸면 비인기 카테고리가 빈약해지므로, 위 폴백 조건으로 해당 카테고리만 DB 직접 조회한다. DB 쿼리는 소수 카테고리 요청에만 발생하므로 절감 효과는 유지된다.
 
 ---
 
@@ -155,23 +167,24 @@ DB 쿼리 **99.95% 절감**.
 ## 검증 방법
 
 ```bash
-# 1. KV 네임스페이스 생성
-cd apps/api && npx wrangler kv:namespace create FEED_CACHE
+# 1. KV 네임스페이스 생성 (wrangler v3.63 — 공백 구문 권장, kv:namespace 콜론 구문은 deprecated 경고)
+cd apps/api && npx wrangler kv namespace create FEED_CACHE
 # 출력된 id를 wrangler.toml의 id에 입력
 
 # 2. Preview namespace 생성 (로컬 개발용)
-npx wrangler kv:namespace create FEED_CACHE --preview
+npx wrangler kv namespace create FEED_CACHE --preview
 # 출력된 id를 wrangler.toml의 id_preview에 입력
 
-# 3. 개발 서버 실행
-pnpm dev:api
+# 3. 개발 서버 실행 (Cron 로컬 테스트하려면 --test-scheduled 필수)
+npx wrangler dev --test-scheduled
+# (pnpm dev:api 는 --test-scheduled 가 없어 /__scheduled 엔드포인트가 노출되지 않음)
 
 # 4. Cron 수동 트리거 (로컬 테스트)
 curl "http://localhost:8787/__scheduled?cron=*%2F30+*+*+*+*"
 
 # 5. 캐시 확인
-npx wrangler kv:key list --namespace-id=<ID>
-npx wrangler kv:key get "feed:trending" --namespace-id=<ID>
+npx wrangler kv key list --namespace-id=<ID>
+npx wrangler kv key get "feed:trending" --namespace-id=<ID>
 
 # 6. API 테스트
 curl "http://localhost:8787/api/videos?feed=trending"
@@ -185,6 +198,6 @@ curl "http://localhost:8787/api/videos?feed=latest&category=게임"
 ## 주의사항
 
 - `FEED_CACHE_TTL_MINUTES`와 `[triggers].crons`는 항상 일치시킨다 (코드로 cron 주기 동적 변경 불가).
-- KV 네임스페이스 ID는 프로젝트마다 고유 — `.dev.vars.example`에는 빈 값으로 유지.
+- `FEED_CACHE_TTL_MINUTES`, `FEED_CACHE_SIZE`, KV 네임스페이스 ID는 모두 `wrangler.toml`에 위치한다. `.dev.vars`와는 무관하므로 `.dev.vars.example` 수정 불필요. (KV ID는 민감정보 아니므로 커밋해도 무방)
 - 첫 배포 후 첫 번째 Cron 실행 전까지는 DB 폴백으로 동작 (정상).
-- Workers 로컬(`wrangler dev`)에서 KV는 인메모리 시뮬레이션으로 동작 (별도 namespace 불필요).
+- Workers 로컬(`wrangler dev`)에서 KV는 인메모리 시뮬레이션으로 동작 (별도 namespace 불필요). 단, `scheduled` 핸들러를 트리거하려면 `--test-scheduled` 플래그 필요.
