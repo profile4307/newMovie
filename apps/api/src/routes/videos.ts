@@ -5,6 +5,7 @@ import { Env } from '../index'
 import { requireAuth, AuthVariables } from '../middleware/auth'
 import { createSupabaseClient } from '../lib/supabase'
 import { attachChannels } from '../lib/channels'
+import { CachedFeed } from '../lib/feed-cache'
 
 type Variables = AuthVariables
 
@@ -64,6 +65,18 @@ app.get(
 
     // 추천 피드 (기본)
     if (feed === 'trending') {
+      // KV 캐시 읽기
+      const cached = await c.env.FEED_CACHE.get<CachedFeed>('feed:trending', 'json')
+      if (cached?.data) {
+        let result = cached.data
+        if (category) result = result.filter((v) => v.category === category)
+        const underfilled = category != null && result.length < Math.ceil(limit / 2)
+        const beyondCache = offset >= cached.data.length
+        if (!underfilled && !beyondCache) {
+          return c.json({ data: result.slice(offset, offset + limit), feed, page, limit })
+        }
+      }
+      // DB 폴백: 캐시 미스 / 비인기 카테고리 (필터 결과 < limit/2) / page 범위 초과
       const { data, error } = await db.rpc<
         { id: string; title: string; description: string; thumbnail_url: string | null; stream_uid: string; duration: number | null; view_count: number; like_count: number; category: string | null; tags: string[]; created_at: string; channel_id: string; trend_score: number }[]
       >('get_trending_videos', { p_limit: limit, p_offset: offset })
@@ -76,6 +89,18 @@ app.get(
     }
 
     // 최신순
+    // KV 캐시 읽기
+    const latestCached = await c.env.FEED_CACHE.get<CachedFeed>('feed:latest', 'json')
+    if (latestCached?.data) {
+      let result = latestCached.data
+      if (category) result = result.filter((v) => v.category === category)
+      const underfilled = category != null && result.length < Math.ceil(limit / 2)
+      const beyondCache = offset >= latestCached.data.length
+      if (!underfilled && !beyondCache) {
+        return c.json({ data: result.slice(offset, offset + limit), feed, page, limit })
+      }
+    }
+    // DB 폴백: 캐시 미스 / 비인기 카테고리 (필터 결과 < limit/2) / page 범위 초과
     let path = `/videos?select=id,title,description,thumbnail_url,stream_uid,duration,view_count,like_count,category,tags,created_at,channel_id&status=eq.published&order=created_at.desc&limit=${limit}&offset=${offset}`
     if (category) path += `&category=eq.${encodeURIComponent(category)}`
 
