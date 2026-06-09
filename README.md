@@ -2,22 +2,32 @@
 
 글로벌 동영상 공유 플랫폼. 운영 비용을 최소화하는 서버리스 아키텍처로 구축되었습니다.
 
+## 라이브
+
+| | URL |
+|------|------|
+| 웹 | https://new-movie.profile4307.workers.dev |
+| API | https://newmovie-api.profile4307.workers.dev |
+
 ## 기술 스택
 
 | 영역 | 기술 | 비용 |
 |------|------|------|
 | 프론트엔드 | Next.js 16 (App Router) + Tailwind CSS | 무료 |
-| 호스팅 | Cloudflare Pages | 무료 |
+| 웹 호스팅 | Cloudflare Workers ([OpenNext](https://opennext.js.org/cloudflare) 어댑터, SSR) | 무료 (100k req/일) |
 | API 서버 | Cloudflare Workers + Hono.js | 무료 (100k req/일) |
+| 피드 캐시 | Cloudflare Workers KV + Cron Trigger | 무료 (읽기 10만/일) |
 | 데이터베이스 | Supabase (PostgreSQL + RLS) | 무료 ~ $25/월 |
-| 인증 | Supabase Auth | 무료 |
-| 프로필 사진 | Supabase Storage | 무료 (1GB) |
+| 인증 | Supabase Auth (이메일 + Google OAuth) | 무료 |
+| 이미지 저장 (썸네일·아바타) | Bunny Storage Zone + CDN | ~$0.01/GB |
 | 동영상 저장/전송 | Bunny Stream | ~$0.005/1,000분 저장 + $0.009~$0.045/GB 전송 |
 
 ## 주요 기능
 
 - **동영상 업로드** — Bunny Stream tus 직접 업로드, 자동 트랜스코딩, HLS 스트리밍
 - **공개 설정** — 전체공개 / 일부공개(링크 공유) / 비공개, 업로드 및 이후 변경 가능
+- **메인 피드 캐싱** — 추천·최신 피드를 Cron Trigger로 주기적으로(기본 30분) 미리 만들어 Workers KV에 저장 → 매 요청마다의 DB 조회를 제거해 트래픽·비용 절감 (캐시 미스/비인기 카테고리는 DB 폴백)
+- **Google 로그인** — Supabase Auth OAuth, 클라이언트 `/auth/callback`에서 세션 설정
 - **추천 피드** — 시간 가중 좋아요 점수 기반 정렬 (`총점 = Σ daily_likes × (10 - 경과일)`)
 - **구독 피드** — 구독 채널의 최신 영상을 업로드 시간 역순으로 표시
 - **멀티 키워드 검색** — 띄어쓰기로 여러 단어 AND 검색, title + description + tags FTS
@@ -95,8 +105,15 @@ BUNNY_STREAM_LIBRARY_ID=your-library-id
 BUNNY_STREAM_API_KEY=your-stream-api-key
 BUNNY_CDN_HOSTNAME=vz-xxxx.b-cdn.net
 BUNNY_WEBHOOK_SECRET=your-webhook-secret
+# Bunny Storage Zone (썸네일·아바타)
+BUNNY_STORAGE_ZONE_NAME=your-storage-zone-name
+BUNNY_STORAGE_PASSWORD=your-storage-zone-api-password
+BUNNY_STORAGE_HOSTNAME=your-pull-zone.b-cdn.net
+BUNNY_STORAGE_ENDPOINT=sg.storage.bunnycdn.com
 ALLOWED_ORIGINS=http://localhost:3000
 ```
+
+> 피드 캐시 설정(`FEED_CACHE_TTL_MINUTES`, `FEED_CACHE_SIZE`)과 Cron 주기는 `apps/api/wrangler.toml`에서 관리합니다. 로컬에서 Cron을 테스트하려면 `npx wrangler dev --test-scheduled` 후 `curl "http://localhost:8787/__scheduled?cron=*/30+*+*+*+*"`로 캐시를 워밍합니다 (KV 바인딩이 없으면 자동 DB 폴백).
 
 ### 5. 개발 서버 실행
 
@@ -114,39 +131,63 @@ pnpm dev:web
 
 ```bash
 cd apps/api
+
+# 최초 1회: 피드 캐시용 KV 네임스페이스 생성 후 wrangler.toml의 id/preview_id 입력
+npx wrangler kv namespace create FEED_CACHE
+npx wrangler kv namespace create FEED_CACHE --preview
+
+# 프로덕션 secret 등록 (최초 1회, 값마다 1회)
+npx wrangler secret put SUPABASE_URL          # 그 외 SUPABASE_*, BUNNY_*, ALLOWED_ORIGINS 모두
+npx wrangler secret put ALLOWED_ORIGINS        # 예: https://new-movie.<sub>.workers.dev,http://localhost:3000
+
+# 배포 (Cron Trigger */30 * * * * 와 FEED_CACHE 바인딩이 wrangler.toml에서 함께 등록됨)
 npx wrangler deploy
 ```
 
-Cloudflare 대시보드 → Workers → 해당 Worker → Settings → Variables에서 프로덕션 환경변수를 등록합니다.
+> `wrangler.toml`의 `[vars]`(ENVIRONMENT, FEED_CACHE_*)는 배포 시 자동 반영됩니다. 비밀값(`SUPABASE_*`, `BUNNY_*`, `ALLOWED_ORIGINS`)만 `wrangler secret put`으로 등록하세요.
 
-### Cloudflare Pages (프론트엔드)
+### Cloudflare Workers (프론트엔드 — OpenNext)
 
-Cloudflare Pages에서 GitHub 저장소를 연결하고 아래와 같이 설정합니다:
+Next.js SSR 앱을 [`@opennextjs/cloudflare`](https://opennext.js.org/cloudflare)로 Workers에 배포합니다. **GitHub 연동(Workers Builds)을 권장** — Cloudflare가 Linux에서 빌드하므로 로컬 환경 의존성이 없습니다.
+
+Cloudflare 대시보드 → Workers & Pages → Create → Workers → **Connect to Git**:
 
 | 항목 | 값 |
 |------|-----|
-| Framework preset | Next.js |
-| Build command | `pnpm build:web` |
-| Build output directory | `apps/web/.next` |
-| Root directory | `/` |
+| Root directory | `apps/web` |
+| Build command | `npx opennextjs-cloudflare build` |
+| Deploy command | `npx wrangler deploy` |
+| Build variables | `NEXT_PUBLIC_*` 4개 (API URL, Supabase URL/anon key, Bunny CDN 호스트) |
 
-빌드 환경변수에 `NEXT_PUBLIC_*` 값들을 추가합니다.
+> `NEXT_PUBLIC_*`는 **빌드 시점에 번들에 박히므로** 런타임 변수가 아니라 **Build variables**에 등록해야 합니다. `wrangler.jsonc`의 Worker `name`은 대시보드에서 만든 Worker 이름과 일치해야 합니다.
+
+로컬에서 빌드·배포하려면 (Linux/WSL 권장 — Windows는 OpenNext의 pnpm 심링크 처리 비호환):
+
+```bash
+cd apps/web
+NEXT_PUBLIC_API_URL=https://<api-worker-url> pnpm deploy   # opennextjs-cloudflare build && deploy
+```
+
+> 배포 후 Supabase 대시보드 → Authentication → URL Configuration에서 **Site URL**과 **Redirect URLs**(`https://<web-url>/**`, `http://localhost:3000/**`)에 배포 도메인을 추가해야 Google 로그인 리다이렉트가 정상 동작합니다.
 
 ## 프로젝트 구조
 
 ```
 newMovie/
 ├── apps/
-│   ├── web/                  # Next.js 프론트엔드
-│   │   └── src/
-│   │       ├── app/          # App Router 페이지
-│   │       ├── components/   # UI 컴포넌트
-│   │       └── lib/          # API 클라이언트, Supabase
+│   ├── web/                  # Next.js 프론트엔드 (Cloudflare Workers / OpenNext)
+│   │   ├── src/
+│   │   │   ├── app/          # App Router 페이지 (auth/callback 포함)
+│   │   │   ├── components/   # UI 컴포넌트
+│   │   │   └── lib/          # API 클라이언트, Supabase
+│   │   ├── open-next.config.ts  # OpenNext (Cloudflare) 빌드 설정
+│   │   └── wrangler.jsonc       # 웹 Worker 설정
 │   └── api/                  # Cloudflare Workers API
+│       ├── wrangler.toml     # KV 바인딩 + Cron Trigger + 피드 캐시 설정
 │       └── src/
 │           ├── routes/       # videos, channels, upload, comments, auth
 │           ├── middleware/   # 인증 미들웨어
-│           └── lib/          # Supabase fetch 클라이언트
+│           └── lib/          # supabase(fetch), feed-cache(KV 갱신), channels, bunny-storage
 └── packages/
     └── db/
         └── schema.sql        # PostgreSQL 스키마 + RPC 함수
@@ -164,6 +205,7 @@ newMovie/
 | PUT | `/api/videos/:id` | 동영상 수정 | ✅ |
 | DELETE | `/api/videos/:id` | 동영상 삭제 | ✅ |
 | POST | `/api/videos/:id/like` | 좋아요 토글 | ✅ |
+| POST | `/api/videos/:id/view` | 조회수 증가 (클라이언트가 하루 1회 호출) | - |
 | GET | `/api/videos/subscription-by-channel` | 구독 피드 (채널별 그룹) | ✅ |
 | GET | `/api/channels/mine` | 내 채널 조회 | ✅ |
 | GET | `/api/channels/:id` | 채널 조회 | - |
