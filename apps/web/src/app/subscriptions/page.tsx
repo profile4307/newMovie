@@ -177,10 +177,11 @@ export default function SubscriptionsPage() {
                 <div key={channel.id}>
                   {/* 채널 헤더 */}
                   <div className="flex items-center gap-3 mb-4">
-                    <div className="w-9 h-9 rounded-full bg-sky-200 overflow-hidden flex-shrink-0">
-                      {channel.avatar_url && (
-                        <Image src={channel.avatar_url} alt={channel.name} width={36} height={36} />
-                      )}
+                    <div className="w-9 h-9 rounded-full bg-sky-200 overflow-hidden flex-shrink-0 flex items-center justify-center">
+                      {channel.avatar_url
+                        ? <Image src={channel.avatar_url} alt={channel.name} width={36} height={36} className="object-cover w-full h-full" />
+                        : <span className="text-sky-600 font-bold text-sm">{channel.name.charAt(0).toUpperCase()}</span>
+                      }
                     </div>
                     <div>
                       <Link href={`/channel/${channel.id}`} className="font-semibold text-slate-800 hover:text-sky-600 transition-colors">

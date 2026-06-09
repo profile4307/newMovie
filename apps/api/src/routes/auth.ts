@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { Env } from '../index'
 import { requireAuth, AuthVariables } from '../middleware/auth'
 import { createSupabaseClient } from '../lib/supabase'
+import { bunnyStorage } from '../lib/bunny-storage'
 
 type Variables = AuthVariables
 
@@ -81,48 +82,61 @@ app.post('/avatar', requireAuth, async (c) => {
     return c.json({ error: '파일이 없습니다' }, 400)
   }
 
-  // 파일 검증
+  // CF Workers에서 file.type이 빈 문자열로 올 수 있음 → PNG로 폴백
+  const mimeType = file.type || 'image/png'
   const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
-  if (!allowedTypes.includes(file.type)) {
+  if (!allowedTypes.includes(mimeType)) {
     return c.json({ error: 'JPG, PNG, WEBP, GIF만 업로드 가능합니다' }, 400)
   }
   if (file.size > 2 * 1024 * 1024) {
     return c.json({ error: '파일 크기는 2MB 이하여야 합니다' }, 400)
   }
 
-  const ext = file.type.split('/')[1]
-  const path = `${userId}.${ext}`
+  const ext = mimeType === 'image/jpeg' ? 'jpg' : mimeType.split('/')[1]
+  // 유저별 폴더 + 타임스탬프 → 정리 쉽고, 매 업로드마다 새 CDN URL (캐시 우회)
+  const ts = Date.now()
+  const folder = `avatars/${userId}/`
+  const path = `${folder}${ts}.${ext}`
   const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = c.env
 
-  // Supabase Storage에 업로드 (upsert)
-  const uploadRes = await fetch(
-    `${SUPABASE_URL}/storage/v1/object/avatars/${path}`,
-    {
-      method: 'POST',
-      headers: {
-        apikey: SUPABASE_SERVICE_ROLE_KEY,
-        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-        'Content-Type': file.type,
-        'x-upsert': 'true',
-      },
-      body: await file.arrayBuffer(),
-    }
-  )
+  const storage = bunnyStorage(c.env)
 
-  if (!uploadRes.ok) {
-    const err = await uploadRes.text()
-    return c.json({ error: `업로드 실패: ${err}` }, 500)
+  // ── 이전 아바타 파일 삭제 (Bunny Storage 절약) ──────────────────────
+  try {
+    const old = await storage.list(folder)
+    await Promise.all(old.map((p) => storage.remove(p)))
+  } catch {
+    // 삭제 실패해도 업로드는 계속 진행
   }
 
-  const avatarUrl = `${SUPABASE_URL}/storage/v1/object/public/avatars/${path}`
+  // Bunny Storage Zone에 업로드
+  let avatarUrl: string
+  try {
+    avatarUrl = await storage.upload(path, await file.arrayBuffer(), mimeType)
+  } catch (e) {
+    return c.json({ error: `업로드 실패: ${e instanceof Error ? e.message : String(e)}` }, 500)
+  }
 
-  // users 테이블 업데이트
   const db = createSupabaseClient(c.env)
+
+  // 1) public.users 테이블 업데이트
   const { error } = await db.query(`/users?id=eq.${userId}`, {
     method: 'PATCH',
     body: JSON.stringify({ avatar_url: avatarUrl }),
   })
   if (error) return c.json({ error }, 500)
+
+  // 2) Supabase Auth user_metadata 업데이트
+  //    → 새로고침 후에도 올바른 아바타가 session에서 읽힘
+  await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userId}`, {
+    method: 'PUT',
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ user_metadata: { avatar_url: avatarUrl } }),
+  })
 
   return c.json({ avatar_url: avatarUrl })
 })

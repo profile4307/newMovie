@@ -28,6 +28,7 @@ export function Header() {
   const [search, setSearch] = useState('')
   const [user, setUser] = useState<User | null>(null)
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined)
+  const [avatarKey, setAvatarKey] = useState(0)  // next/image 강제 리렌더용
   const [subscriberCount, setSubscriberCount] = useState<number | null>(null)
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [cropFile, setCropFile] = useState<File | null>(null)
@@ -76,6 +77,7 @@ export function Header() {
     try {
       const res = await api.auth.uploadAvatar(croppedFile)
       setAvatarUrl(res.avatar_url)
+      setAvatarKey(k => k + 1)  // next/image 캐시 무효화
       showToast('프로필 사진이 변경되었습니다', 'success')
     } catch (err) {
       showToast(err instanceof Error ? err.message : '업로드 실패', 'error')
@@ -181,7 +183,7 @@ export function Header() {
             <div ref={menuRef} className="relative">
               <button onClick={() => setMenuOpen((v) => !v)} className="flex items-center gap-2 hover:opacity-80 transition-opacity">
                 {avatarUrl ? (
-                  <Image src={avatarUrl} alt={displayName} width={32} height={32} className="rounded-full border-2 border-white/50" />
+                  <Image key={avatarKey} src={avatarUrl} alt={displayName} width={32} height={32} className="rounded-full border-2 border-white/50" />
                 ) : (
                   <div className="w-8 h-8 rounded-full bg-white/30 flex items-center justify-center text-sm font-bold">
                     {displayName.charAt(0).toUpperCase()}
@@ -199,7 +201,7 @@ export function Header() {
                         onClick={() => fileInputRef.current?.click()}>
                         <div className="w-10 h-10 rounded-full bg-sky-100 overflow-hidden border-2 border-sky-200">
                           {avatarUrl ? (
-                            <Image src={avatarUrl} alt={displayName} width={40} height={40} className="object-cover w-full h-full" />
+                            <Image key={avatarKey} src={avatarUrl} alt={displayName} width={40} height={40} className="object-cover w-full h-full" />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center text-sky-500 font-bold text-sm">
                               {displayName.charAt(0).toUpperCase()}

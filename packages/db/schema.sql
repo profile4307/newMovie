@@ -487,12 +487,15 @@ returns table(
   channel_latest_at timestamptz
 ) as $$
   with channel_order as (
-    select c.id, c.name, c.avatar_url,
+    select c.id, c.name,
+           -- channels.avatar_url 없으면 채널 소유자의 users.avatar_url 사용
+           coalesce(c.avatar_url, u.avatar_url) as avatar_url,
            max(v.created_at) as latest_at
     from channels c
     inner join subscriptions s on s.channel_id = c.id and s.user_id = p_user_id
+    left join public.users u on u.id = c.owner_id
     left join videos v on v.channel_id = c.id and v.status = 'published'
-    group by c.id, c.name, c.avatar_url
+    group by c.id, c.name, coalesce(c.avatar_url, u.avatar_url)
   ),
   ranked as (
     select v.id, v.title, v.thumbnail_url, v.stream_uid,

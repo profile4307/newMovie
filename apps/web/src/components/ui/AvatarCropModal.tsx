@@ -15,15 +15,26 @@ const DEF_RADIUS = 130
 const OUT_SIZE   = 400   // 출력 해상도
 
 export function AvatarCropModal({ file, onConfirm, onCancel }: Props) {
-  const objectUrl = useRef('')
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const imgEl     = useRef<HTMLImageElement | null>(null)
-  const [imgNat, setImgNat]     = useState({ w: 0, h: 0 })
-  const [radius, setRadius]     = useState(DEF_RADIUS)
-  const [offset, setOffset]     = useState({ x: 0, y: 0 })
-  const [loaded, setLoaded]     = useState(false)
+  const objectUrl  = useRef('')
+  const canvasRef  = useRef<HTMLCanvasElement>(null)   // 출력용 캔버스
+  const p72Ref     = useRef<HTMLCanvasElement>(null)   // 미리보기 72px
+  const p44Ref     = useRef<HTMLCanvasElement>(null)   // 미리보기 44px
+  const p28Ref     = useRef<HTMLCanvasElement>(null)   // 미리보기 28px
+  const imgEl      = useRef<HTMLImageElement | null>(null)
+
+  const [imgNat, setImgNat] = useState({ w: 0, h: 0 })
+  const [radius, setRadius] = useState(DEF_RADIUS)
+  const [offset, setOffset] = useState({ x: 0, y: 0 })
+  const [loaded, setLoaded] = useState(false)
 
   const drag = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null)
+
+  // ── 렌더 크기: 이미지 전체가 컨테이너 안에 들어오도록 (contain) ──
+  const scale = imgNat.w && imgNat.h
+    ? Math.min(CONTAINER / imgNat.w, CONTAINER / imgNat.h)
+    : 1
+  const rw = imgNat.w * scale
+  const rh = imgNat.h * scale
 
   // ── 이미지 로드 ──────────────────────────────────────────────────
   useEffect(() => {
@@ -41,21 +52,13 @@ export function AvatarCropModal({ file, onConfirm, onCancel }: Props) {
     return () => URL.revokeObjectURL(objectUrl.current)
   }, [file])
 
-  // ── 렌더 스케일: 이미지가 컨테이너를 꽉 채우도록 (cover) ─────────
-  // → 어떤 비율이어도 원을 항상 완전히 덮음
-  const scale = imgNat.w && imgNat.h
-    ? Math.max(CONTAINER / imgNat.w, CONTAINER / imgNat.h)
-    : 1
-  const rw = imgNat.w * scale
-  const rh = imgNat.h * scale
-
-  // ── 오프셋 클램핑 ────────────────────────────────────────────────
-  const clamp = useCallback((ox: number, oy: number, r: number) => {
-    return {
-      x: Math.max(-(rw / 2 - r), Math.min(rw / 2 - r, ox)),
-      y: Math.max(-(rh / 2 - r), Math.min(rh / 2 - r, oy)),
-    }
-  }, [rw, rh])
+  // ── 오프셋 클램핑 ─────────────────────────────────────────────────
+  // 최소 ±180px (360px) 드래그 보장 → 원이 이미지 밖으로 자유롭게 이동 가능
+  const HALF_MIN_DRAG = 180
+  const clamp = useCallback((ox: number, oy: number, _r: number) => ({
+    x: Math.max(-Math.max(rw / 2, HALF_MIN_DRAG), Math.min(Math.max(rw / 2, HALF_MIN_DRAG), ox)),
+    y: Math.max(-Math.max(rh / 2, HALF_MIN_DRAG), Math.min(Math.max(rh / 2, HALF_MIN_DRAG), oy)),
+  }), [rw, rh])
 
   // ── 드래그 ───────────────────────────────────────────────────────
   function onPointerDown(e: React.PointerEvent) {
@@ -79,21 +82,69 @@ export function AvatarCropModal({ file, onConfirm, onCancel }: Props) {
     setOffset(prev => clamp(prev.x, prev.y, nr))
   }
 
-  // ── Canvas 크롭 ──────────────────────────────────────────────────
-  // 원 중심(컨테이너 중심)이 이미지에서 어느 픽셀인지:
-  //   imageLeft = CONTAINER/2 - rw/2 + offset.x
-  //   circleCX in image = CONTAINER/2 - imageLeft = rw/2 - offset.x
+  // ── 미리보기 Canvas 그리기 ───────────────────────────────────────
+  // 미리보기 = 크롭 영역 전체를 canvas 크기에 맞게 축소
+  // → radius 변경 시 이미지 크기 불변, 원 크기만 변함
+  function drawPreview(canvas: HTMLCanvasElement | null, size: number) {
+    const img = imgEl.current
+    if (!canvas || !img || !imgNat.w) return
+
+    const dpr = window.devicePixelRatio || 1
+    canvas.width  = size * dpr
+    canvas.height = size * dpr
+    const ctx = canvas.getContext('2d')!
+    ctx.scale(dpr, dpr)
+    ctx.clearRect(0, 0, size, size)
+
+    const s = size / CONTAINER   // 컨테이너 → 미리보기 배율
+
+    // 이미지 그리기 (원본 → 미리보기 크기로 직접 drawImage)
+    const imgLeft = (CONTAINER / 2 - rw / 2 + offset.x) * s
+    const imgTop  = (CONTAINER / 2 - rh / 2 + offset.y) * s
+    ctx.drawImage(img, 0, 0, imgNat.w, imgNat.h, imgLeft, imgTop, rw * s, rh * s)
+
+    // 원 바깥 어둡게
+    const cx = size / 2
+    const cy = size / 2
+    const cr = radius * s
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'
+    ctx.beginPath()
+    ctx.rect(0, 0, size, size)
+    ctx.arc(cx, cy, cr, 0, Math.PI * 2, true)  // CCW = 구멍
+    ctx.fill()
+
+    // 원 테두리
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)'
+    ctx.lineWidth   = 1
+    ctx.setLineDash([3, 2])
+    ctx.beginPath()
+    ctx.arc(cx, cy, cr, 0, Math.PI * 2)
+    ctx.stroke()
+  }
+
+  useEffect(() => {
+    if (!loaded) return
+    drawPreview(p72Ref.current, 72)
+    drawPreview(p44Ref.current, 44)
+    drawPreview(p28Ref.current, 28)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, offset.x, offset.y, radius, imgNat.w, imgNat.h, rw, rh])
+
+  // ── 최종 크롭 Canvas 내보내기 ────────────────────────────────────
   function handleConfirm() {
     const canvas = canvasRef.current
     const img    = imgEl.current
     if (!canvas || !img || !imgNat.w) return
+
     const ctx = canvas.getContext('2d')!
     canvas.width  = OUT_SIZE
     canvas.height = OUT_SIZE
+    ctx.clearRect(0, 0, OUT_SIZE, OUT_SIZE)
 
-    const cxNat = (rw / 2 - offset.x) / scale   // 원 중심 X (원본 px)
-    const cyNat = (rh / 2 - offset.y) / scale   // 원 중심 Y (원본 px)
-    const rNat  = radius / scale                 // 반지름 (원본 px)
+    // 원 중심 → 원본 이미지 좌표
+    const cxNat = (rw / 2 - offset.x) / scale
+    const cyNat = (rh / 2 - offset.y) / scale
+    const rNat  = radius / scale
 
     ctx.beginPath()
     ctx.arc(OUT_SIZE / 2, OUT_SIZE / 2, OUT_SIZE / 2, 0, Math.PI * 2)
@@ -104,51 +155,6 @@ export function AvatarCropModal({ file, onConfirm, onCancel }: Props) {
       if (!blob) return
       onConfirm(new File([blob], 'avatar.png', { type: 'image/png' }))
     }, 'image/png', 0.95)
-  }
-
-  // ── 미리보기 ─────────────────────────────────────────────────────
-  // 수식 유도:
-  //   원 안에 보이는 이미지 영역 (render 좌표계):
-  //     left  = rw/2 - offset.x - radius
-  //     top   = rh/2 - offset.y - radius
-  //     size  = radius * 2
-  //   preview에서 이 영역이 (0,0)~(size,size) 에 대응해야 함
-  //   viewScale = previewSize / (radius * 2)
-  //   img.left in preview = -left * viewScale
-  //              = -(rw/2 - offset.x - radius) * viewScale
-  //              = previewSize/2 - pw/2 + offset.x * viewScale
-  function PreviewCircle({ size }: { size: number }) {
-    if (!loaded) return null
-    const vs  = size / (radius * 2)
-    const pw  = rw * vs
-    const ph  = rh * vs
-    const px  = size / 2 - pw / 2 + offset.x * vs
-    const py  = size / 2 - ph / 2 + offset.y * vs
-    return (
-      <div className="flex flex-col items-center gap-1.5">
-        <div
-          className="rounded-full overflow-hidden bg-slate-200 border-2 border-sky-200 flex-shrink-0 relative"
-          style={{ width: size, height: size }}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={objectUrl.current}
-            alt=""
-            draggable={false}
-            style={{
-              position: 'absolute',
-              left: px,
-              top: py,
-              width: pw,
-              height: ph,
-              pointerEvents: 'none',
-              userSelect: 'none',
-            }}
-          />
-        </div>
-        <span className="text-xs text-slate-400">{size}px</span>
-      </div>
-    )
   }
 
   const cx = CONTAINER / 2
@@ -183,7 +189,6 @@ export function AvatarCropModal({ file, onConfirm, onCancel }: Props) {
               onPointerUp={onPointerUp}
               onPointerLeave={onPointerUp}
             >
-              {/* 이미지 — plain <img> 사용으로 정확한 렌더 크기 보장 */}
               {loaded && (
                 /* eslint-disable-next-line @next/next/no-img-element */
                 <img
@@ -202,7 +207,7 @@ export function AvatarCropModal({ file, onConfirm, onCancel }: Props) {
                 />
               )}
 
-              {/* 원 바깥 어둡게 + 원 테두리 */}
+              {/* 원 바깥 어둡게 + 테두리 */}
               <svg className="absolute inset-0 pointer-events-none" width={CONTAINER} height={CONTAINER}>
                 <defs>
                   <mask id="cropHole">
@@ -225,11 +230,7 @@ export function AvatarCropModal({ file, onConfirm, onCancel }: Props) {
             <div className="flex items-center gap-3">
               <div className="w-3 h-3 rounded-full border-2 border-slate-300 flex-shrink-0" />
               <input
-                type="range"
-                min={MIN_RADIUS}
-                max={MAX_RADIUS}
-                step={1}
-                value={radius}
+                type="range" min={MIN_RADIUS} max={MAX_RADIUS} step={1} value={radius}
                 onChange={handleRadiusSlider}
                 className="flex-1 h-1.5 rounded-full accent-sky-500 cursor-pointer"
               />
@@ -237,11 +238,21 @@ export function AvatarCropModal({ file, onConfirm, onCancel }: Props) {
             </div>
           </div>
 
-          {/* ── 미리보기 ── */}
+          {/* ── 미리보기 (크롭 영역 축소판) ── */}
           <div className="flex items-end justify-center gap-6 py-1">
-            <PreviewCircle size={72} />
-            <PreviewCircle size={44} />
-            <PreviewCircle size={28} />
+            {[
+              { ref: p72Ref, size: 72 },
+              { ref: p44Ref, size: 44 },
+              { ref: p28Ref, size: 28 },
+            ].map(({ ref, size }) => (
+              <div key={size} className="flex flex-col items-center gap-1.5">
+                <canvas
+                  ref={ref}
+                  style={{ width: size, height: size, borderRadius: 4, border: '1px solid #bae6fd', backgroundColor: '#1e293b' }}
+                />
+                <span className="text-xs text-slate-400">{size}px</span>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -256,7 +267,8 @@ export function AvatarCropModal({ file, onConfirm, onCancel }: Props) {
         </div>
       </div>
 
-      <canvas ref={canvasRef} className="hidden" />
+      {/* 출력용 캔버스: display:none 대신 화면 밖으로 배치 (toBlob 안정성) */}
+      <canvas ref={canvasRef} style={{ position: 'fixed', top: -9999, left: -9999, opacity: 0, pointerEvents: 'none' }} />
     </div>
   )
 }

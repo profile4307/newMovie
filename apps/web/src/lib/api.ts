@@ -100,6 +100,8 @@ export const api = {
     }) => request<{ data: Video }>('/api/videos', { method: 'POST', body: JSON.stringify(body) }),
     like: (id: string) =>
       request<{ liked: boolean }>(`/api/videos/${id}/like`, { method: 'POST' }),
+    view: (id: string) =>
+      request<{ ok: boolean }>(`/api/videos/${id}/view`, { method: 'POST' }),
     mine: () => request<{ data: (Video & { status: string })[] }>('/api/videos/mine'),
     update: (id: string, body: {
       title?: string

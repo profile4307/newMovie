@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { Env } from '../index'
 import { requireAuth, AuthVariables } from '../middleware/auth'
 import { createSupabaseClient } from '../lib/supabase'
+import { bunnyStorage } from '../lib/bunny-storage'
 
 type Variables = AuthVariables
 
@@ -72,38 +73,27 @@ app.post('/thumbnail', requireAuth, async (c) => {
   const file = formData.get('file') as Blob | null
   if (!file) return c.json({ error: '파일이 없습니다' }, 400)
 
+  // CF Workers에서 file.type이 빈 문자열로 올 수 있음 → PNG로 폴백
+  const mimeType = file.type || 'image/png'
   const allowedTypes = ['image/jpeg', 'image/png', 'image/webp']
-  if (!allowedTypes.includes(file.type)) {
+  if (!allowedTypes.includes(mimeType)) {
     return c.json({ error: 'JPG, PNG, WEBP만 업로드 가능합니다' }, 400)
   }
   if (file.size > 5 * 1024 * 1024) {
     return c.json({ error: '파일 크기는 5MB 이하여야 합니다' }, 400)
   }
 
-  const ext = file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1]
-  const path = `${userId}_${Date.now()}.${ext}`
-  const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = c.env
+  const ext = mimeType === 'image/jpeg' ? 'jpg' : mimeType.split('/')[1]
+  // 파일명에 타임스탬프 포함 → 매 업로드마다 새 CDN URL (캐시 우회)
+  const path = `thumbnails/${userId}_${Date.now()}.${ext}`
 
-  const uploadRes = await fetch(
-    `${SUPABASE_URL}/storage/v1/object/thumbnails/${path}`,
-    {
-      method: 'POST',
-      headers: {
-        apikey: SUPABASE_SERVICE_ROLE_KEY,
-        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-        'Content-Type': file.type,
-        'x-upsert': 'true',
-      },
-      body: await file.arrayBuffer(),
-    }
-  )
-
-  if (!uploadRes.ok) {
-    const err = await uploadRes.text()
-    return c.json({ error: `업로드 실패: ${err}` }, 500)
+  let thumbnail_url: string
+  try {
+    thumbnail_url = await bunnyStorage(c.env).upload(path, await file.arrayBuffer(), mimeType)
+  } catch (e) {
+    return c.json({ error: `업로드 실패: ${e instanceof Error ? e.message : String(e)}` }, 500)
   }
 
-  const thumbnail_url = `${SUPABASE_URL}/storage/v1/object/public/thumbnails/${path}`
   return c.json({ thumbnail_url })
 })
 

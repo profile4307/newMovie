@@ -305,6 +305,8 @@ export default function MyVideosPage() {
   const { toasts, show: showToast, remove: removeToast } = useToast()
   const [videos, setVideos] = useState<MyVideo[]>([])
   const [subscriberCount, setSubscriberCount] = useState<number | null>(null)
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+  const [displayName, setDisplayName] = useState('')
   const [loading, setLoading] = useState(true)
   const [editTarget, setEditTarget] = useState<MyVideo | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<MyVideo | null>(null)
@@ -313,6 +315,9 @@ export default function MyVideosPage() {
   const loadVideos = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) { router.replace('/login'); return }
+    const u = session.user
+    setAvatarUrl((u.user_metadata?.avatar_url as string | null) ?? null)
+    setDisplayName((u.user_metadata?.full_name ?? u.user_metadata?.name ?? u.email ?? '') as string)
     try {
       const [videosResult, channelResult] = await Promise.all([
         api.videos.mine(),
@@ -392,11 +397,20 @@ export default function MyVideosPage() {
 
       <div className="max-w-screen-xl mx-auto px-4 py-8">
         <div className="flex items-center justify-between mb-8">
-          <div className="flex items-baseline gap-3">
-            <h1 className="text-2xl font-bold text-slate-800">내 동영상</h1>
-            {subscriberCount !== null && (
-              <span className="text-sm text-slate-500">구독자 <span className="font-semibold text-sky-600">{formatKorean(subscriberCount)}</span>명</span>
-            )}
+          <div className="flex items-center gap-3">
+            {/* 프로필 사진 */}
+            <div className="w-11 h-11 rounded-full bg-sky-100 overflow-hidden flex-shrink-0 flex items-center justify-center border-2 border-sky-200">
+              {avatarUrl
+                ? <Image src={avatarUrl} alt={displayName} width={44} height={44} className="object-cover w-full h-full" />
+                : <span className="text-sky-500 font-bold text-lg">{displayName.charAt(0).toUpperCase()}</span>
+              }
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-slate-800">내 동영상</h1>
+              {subscriberCount !== null && (
+                <span className="text-sm text-slate-500">구독자 <span className="font-semibold text-sky-600">{formatKorean(subscriberCount)}</span>명</span>
+              )}
+            </div>
           </div>
           <Link
             href="/upload"

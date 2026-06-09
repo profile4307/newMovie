@@ -18,12 +18,15 @@ export function VideoPlayer({ streamUid, customerSubdomain, poster }: Props) {
     const video = videoRef.current
     if (!video) return
 
-    let hls: import('hls.js').default | null = null
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let hls: any = null
 
     async function initHls() {
       const Hls = (await import('hls.js')).default
       if (Hls.isSupported()) {
-        hls = new Hls()
+        // 버퍼 상한 — 이탈 시 미리 받은 세그먼트 낭비(Bunny 전송비) 차단.
+        // 더 공격적으로 줄이려면 15/30. 리버퍼 위험과 트레이드오프.
+        hls = new Hls({ maxBufferLength: 30, maxMaxBufferLength: 60 })
         hls.loadSource(hlsUrl)
         hls.attachMedia(video!)
         hls.on(Hls.Events.MANIFEST_PARSED, () => {

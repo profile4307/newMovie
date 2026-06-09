@@ -46,6 +46,21 @@ function timeAgo(dateStr: string): string {
   return months < 12 ? `${months}개월 전` : `${Math.floor(months / 12)}년 전`
 }
 
+// 조회수 중복 카운트 방지 — 같은 영상은 브라우저당 하루 1회만 +1 (DB write 절감)
+function countViewOnce(id: string) {
+  try {
+    const KEY = 'nm_viewed'
+    const today = new Date().toISOString().slice(0, 10)
+    const map = JSON.parse(localStorage.getItem(KEY) || '{}') as Record<string, string>
+    if (map[id] === today) return
+    map[id] = today
+    localStorage.setItem(KEY, JSON.stringify(map))
+    api.videos.view(id).catch(() => {})
+  } catch {
+    // localStorage 불가 환경 → 카운트 생략
+  }
+}
+
 function RelatedCard({ video }: { video: Video }) {
   return (
     <Link href={`/watch/${video.id}`} className="group flex gap-2">
@@ -93,7 +108,12 @@ export default function WatchPage() {
 
     api.videos.get(params.id)
       .then(async (res) => {
-        setVideo(res.data)
+        const data = res.data as Video & { status?: string }
+        setVideo(data)
+        // 공개 영상만 조회수 카운트 (하루 1회)
+        if (!data.status || data.status === 'published') {
+          countViewOnce(params.id)
+        }
         // 관련 영상 병렬 로드
         api.videos.related(params.id).then((r) => setRelated(r.data)).catch(() => {})
       })
@@ -163,10 +183,11 @@ export default function WatchPage() {
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mt-4">
                 {/* 채널 */}
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-sky-100 overflow-hidden flex-shrink-0">
-                    {video.channel.avatar_url && (
-                      <Image src={video.channel.avatar_url} alt={video.channel.name} width={40} height={40} />
-                    )}
+                  <div className="w-10 h-10 rounded-full bg-sky-100 overflow-hidden flex-shrink-0 flex items-center justify-center">
+                    {video.channel.avatar_url
+                      ? <Image src={video.channel.avatar_url} alt={video.channel.name} width={40} height={40} className="object-cover w-full h-full" />
+                      : <span className="text-sky-500 font-bold text-sm">{video.channel.name.charAt(0).toUpperCase()}</span>
+                    }
                   </div>
                   <Link href={`/channel/${video.channel.id}`} className="font-semibold text-slate-900 hover:text-sky-600 transition-colors">
                     {video.channel.name}

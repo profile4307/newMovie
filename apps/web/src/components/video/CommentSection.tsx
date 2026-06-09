@@ -41,11 +41,13 @@ function ReplySection({
   parentId,
   videoId,
   currentUserId,
+  currentUserAvatar,
   onCountChange,
 }: {
   parentId: string
   videoId: string
   currentUserId: string | null
+  currentUserAvatar: string | null
   onCountChange: (delta: number) => void
 }) {
   const [replies, setReplies] = useState<Comment[]>([])
@@ -114,7 +116,12 @@ function ReplySection({
       {/* 대댓글 입력 */}
       {currentUserId && (
         <div className="flex gap-2 pt-1">
-          <div className="w-7 h-7 rounded-full bg-sky-100 flex-shrink-0" />
+          <div className="w-7 h-7 rounded-full bg-sky-100 flex-shrink-0 overflow-hidden flex items-center justify-center">
+            {currentUserAvatar
+              ? <Image src={currentUserAvatar} alt="me" width={28} height={28} className="object-cover" />
+              : <span className="text-sky-400 text-xs font-bold">나</span>
+            }
+          </div>
           <div className="flex-1 flex gap-2 items-end">
             <textarea
               ref={replyTextareaRef}
@@ -145,11 +152,13 @@ function CommentItem({
   comment,
   videoId,
   currentUserId,
+  currentUserAvatar,
   onDelete,
 }: {
   comment: Comment
   videoId: string
   currentUserId: string | null
+  currentUserAvatar: string | null
   onDelete: (id: string) => void
 }) {
   const [showReplies, setShowReplies] = useState(false)
@@ -206,6 +215,7 @@ function CommentItem({
           parentId={comment.id}
           videoId={videoId}
           currentUserId={currentUserId}
+          currentUserAvatar={currentUserAvatar}
           onCountChange={(delta) => setReplyCount((n) => Math.max(0, n + delta))}
         />
       )}
@@ -351,6 +361,7 @@ export function CommentSection({ videoId, initialCommentCount = 0 }: { videoId: 
               comment={c}
               videoId={videoId}
               currentUserId={currentUserId}
+              currentUserAvatar={currentUserAvatar}
               onDelete={deleteComment}
             />
           ))}

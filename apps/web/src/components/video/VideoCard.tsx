@@ -63,10 +63,11 @@ export function VideoCard({ video }: Props) {
       </div>
 
       <div className="mt-2.5 flex gap-2.5">
-        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-sky-200 overflow-hidden">
-          {video.channel.avatar_url && (
-            <Image src={video.channel.avatar_url} alt={video.channel.name} width={32} height={32} />
-          )}
+        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-sky-200 overflow-hidden flex items-center justify-center">
+          {video.channel.avatar_url
+            ? <Image src={video.channel.avatar_url} alt={video.channel.name} width={32} height={32} className="object-cover w-full h-full" />
+            : <span className="text-sky-600 font-bold text-xs">{video.channel.name.charAt(0).toUpperCase()}</span>
+          }
         </div>
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold text-sm leading-snug line-clamp-2 text-slate-900 group-hover:text-sky-600 transition-colors">

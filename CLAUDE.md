@@ -19,9 +19,14 @@ cd apps/api && npx tsc --noEmit
 # 린트
 cd apps/web && npx eslint src
 
+# 서버 전체 종료 (Windows)
+taskkill //F //IM node.exe
+
 # 배포
 cd apps/api && npx wrangler deploy   # Cloudflare Workers 배포
 pnpm build:web                        # Next.js 빌드 (Cloudflare Pages는 CI에서 자동)
+# Workers 환경변수(secrets) 등록 — .dev.vars 추가 후 배포 전 필수
+cd apps/api && npx wrangler secret put <VAR_NAME>
 ```
 
 ## 환경변수 설정
@@ -40,9 +45,10 @@ pnpm build:web                        # Next.js 빌드 (Cloudflare Pages는 CI�
 - **인증**: [`src/middleware/auth.ts`](apps/api/src/middleware/auth.ts) — `Authorization: Bearer <token>`을 Supabase Auth로 검증. `requireAuth` 미들웨어를 보호된 라우트에 적용.
 - **DB 접근**: [`src/lib/supabase.ts`](apps/api/src/lib/supabase.ts) — Supabase REST API를 `fetch`로 직접 호출 (Workers 환경에는 Supabase JS SDK 대신 raw fetch 사용). `createSupabaseClient`는 service role key, `createAnonClient`는 토큰 검증용.
 - **동영상 업로드**: [`src/routes/upload.ts`](apps/api/src/routes/upload.ts) — Bunny Stream 비디오 생성 + tus 서명 발급 → 클라이언트가 tus-js-client로 Bunny에 직접 업로드 → `/api/upload/stream-status/:uid`로 트랜스코딩 상태 확인.
-- **라우트 구조**: `POST /api/videos` → 메타데이터 저장 (업로드는 별도 `/api/upload`). 조회수 증가는 `c.executionCtx.waitUntil()`로 비동기 처리.
+- **Bunny Storage**: [`src/lib/bunny-storage.ts`](apps/api/src/lib/bunny-storage.ts) — 썸네일·아바타 업로드/삭제/목록 헬퍼. `upload(path, bytes, mime)` → CDN URL 반환. `list(prefix)` → 파일 경로 배열 반환.
+- **라우트 구조**: `POST /api/videos` → 메타데이터 저장 (업로드는 별도 `/api/upload`). 조회수 증가는 GET과 분리된 `POST /:id/view`로 처리 — 클라이언트가 `localStorage('nm_viewed')`로 하루 1회만 호출해 DB write 절감.
 
-### `apps/web` — Next.js 14 (App Router)
+### `apps/web` — Next.js 16 (App Router)
 
 - **API 호출**: [`src/lib/api.ts`](apps/web/src/lib/api.ts) — 모든 백엔드 호출의 단일 진입점. Supabase 세션 토큰을 자동으로 Authorization 헤더에 첨부.
 - **Supabase 클라이언트**: [`src/lib/supabase.ts`](apps/web/src/lib/supabase.ts) — 브라우저용 싱글톤. 서버 컴포넌트에서는 직접 사용 금지 (쿠키 기반 세션 처리 필요 시 별도 서버 클라이언트 생성 필요).
@@ -54,7 +60,7 @@ pnpm build:web                        # Next.js 빌드 (Cloudflare Pages는 CI�
 
 ### `packages/db`
 
-[`schema.sql`](packages/db/schema.sql)을 Supabase SQL 에디터에서 직접 실행. 모든 테이블에 RLS(Row Level Security) 적용됨. `view_count`/`like_count`/`subscriber_count` 증감은 Workers에서 raw SQL 표현식 대신 PATCH로 처리 중 — 동시성 문제가 생기면 Supabase RPC(stored function)로 교체 필요.
+[`schema.sql`](packages/db/schema.sql)을 Supabase SQL 에디터에서 직접 실행. 모든 테이블에 RLS(Row Level Security) 적용됨. `view_count`/`like_count`/`subscriber_count` 증감은 모두 Supabase RPC(stored function)로 처리 (`increment_view_count`, `toggle_like`, `toggle_subscription`). race condition 방지 및 atomic 보장.
 
 **스키마 변경 워크플로우:**
 1. `schema.sql` 수정
@@ -66,17 +72,18 @@ pnpm build:web                        # Next.js 빌드 (Cloudflare Pages는 CI�
 | 서비스 | 용도 |
 |--------|------|
 | **Bunny Stream** | 동영상 트랜스코딩 + HLS 전송 (비용: ~$0.005/1,000분 저장, $0.009/GB 전송) |
+| **Bunny Storage Zone** | 썸네일·아바타 이미지 저장 + CDN 서빙 (~$0.01/GB, Supabase egress 대비 9배 저렴). 헬퍼: `apps/api/src/lib/bunny-storage.ts` |
 | **Cloudflare Workers** | API 서버 (서버리스, 엣지 실행) |
 | **Cloudflare Pages** | Next.js 프론트 호스팅 (무료) |
 | **Supabase** | PostgreSQL DB + Auth + RLS |
-| **Supabase Storage** | 프로필 사진 저장 (bucket: `avatars`, 무료 1GB) |
+| **Supabase Storage** | 구버전 아바타·썸네일 파일 보관 (신규 업로드는 Bunny Storage로 이전됨, bucket `avatars`/`thumbnails` 유지 필요) |
 
 ## 주의사항
 
 - `pnpm install`은 항상 `--ignore-scripts` 플래그 필요 (없으면 `sharp`, `unrs-resolver` 빌드 스크립트 오류 발생).
 - Workers에서 Supabase를 사용할 때 Supabase JS SDK 대신 `src/lib/supabase.ts`의 raw fetch 방식 유지 — Workers 런타임과의 호환성 때문.
 - 새 라우트 추가 시 [`apps/api/src/index.ts`](apps/api/src/index.ts)에 `app.route()` 등록 필요.
-- Bunny 환경변수: `BUNNY_STREAM_LIBRARY_ID`(숫자), `BUNNY_STREAM_API_KEY`(Stream 라이브러리 키), `BUNNY_CDN_HOSTNAME`(예: `vz-xxxx.b-cdn.net`).
+- Bunny 환경변수: `BUNNY_STREAM_LIBRARY_ID`(숫자), `BUNNY_STREAM_API_KEY`(Stream 라이브러리 키), `BUNNY_CDN_HOSTNAME`(예: `vz-xxxx.b-cdn.net`). Storage Zone: `BUNNY_STORAGE_ZONE_NAME`, `BUNNY_STORAGE_PASSWORD`(API/HTTP Access Key), `BUNNY_STORAGE_HOSTNAME`(Pull Zone CDN 도메인), `BUNNY_STORAGE_ENDPOINT`(리전 엔드포인트, 예: `sg.storage.bunnycdn.com`).
 
 ## 알려진 함정 및 해결책
 
@@ -88,10 +95,11 @@ pnpm build:web                        # Next.js 빌드 (Cloudflare Pages는 CI�
 - **서버 컴포넌트에서 auth 토큰 접근 불가**: 인증이 필요한 피드(구독 등)는 클라이언트 컴포넌트로 분리해야 함.
 - **Cloudflare Stream duration**: API가 float 반환 → zod에서 `.transform(Math.floor)` 필요.
 - **env.example 동기화**: `.env.local` 수정 시 `.env.example`도, `.dev.vars` 수정 시 `.dev.vars.example`도 함께 수정 (민감정보 제외).
-- **Next.js 외부 이미지 도메인**: 새 외부 이미지 도메인 추가 시 `apps/web/next.config.js`의 `images.remotePatterns`에 등록 필요 (예: Google 프로필 사진 `lh3.googleusercontent.com`).
+- **Next.js 외부 이미지 도메인**: 새 외부 이미지 도메인 추가 시 `apps/web/next.config.ts`의 `images.remotePatterns`에 등록 필요 (예: Google 프로필 사진 `lh3.googleusercontent.com`).
 - **Bunny Stream 영상 isPublic**: 기본값 `false` — 영상 생성 시 반드시 `isPublic: true` 포함해야 CDN 접근 가능.
 - **Bunny CDN "Block direct url file access"**: Stream 라이브러리 → Security → General에서 기본 활성화됨 → 반드시 비활성화 필요 (활성화 시 썸네일/영상 403).
+- **Cloudflare Pages Image Resizing 과금**: `next/image`가 살아있으면 $0.50/1,000 변환 과금 발생 가능. `next.config.ts`에 `images.unoptimized: true` 설정으로 차단 (이미지는 Bunny CDN에서 직접 서빙).
 - **Bunny tus 서명**: `sha256(libraryId + apiKey + expirationTime + videoId)` — Workers에서 `crypto.subtle.digest('SHA-256', ...)` 로 생성.
-- **Supabase Storage 프로필 사진**: bucket `avatars` (public) 생성 필요. Workers에서 `/storage/v1/object/avatars/{path}`로 업로드. RLS 정책 schema.sql에 포함.
+- **Bunny Storage Zone 아바타**: 아바타는 `avatars/{userId}/` 폴더에 저장. 신규 업로드 시 이전 파일 자동 삭제. 구버전 Supabase `avatars` bucket 파일은 점진적으로 대체됨 (bucket 유지 필요).
 - **본인 채널 구독 방지**: `POST /api/channels/:id/subscribe`에서 `channel.owner_id === userId` 체크.
-- **Workers에서 File instanceof 불가**: `formData.get('file') as Blob` 으로 처리.
+- **Workers에서 File instanceof 불가**: `formData.get('file') as Blob` 으로 처리. `file.type`도 빈 문자열(`''`)로 올 수 있음 → `file.type || 'image/png'` 폴백 필수 (upload.ts, auth.ts 참고).

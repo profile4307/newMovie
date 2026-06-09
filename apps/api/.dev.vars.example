@@ -5,4 +5,10 @@ BUNNY_STREAM_LIBRARY_ID=your-library-id
 BUNNY_STREAM_API_KEY=your-stream-api-key
 BUNNY_CDN_HOSTNAME=vz-xxxxxxxx-xxx.b-cdn.net
 BUNNY_WEBHOOK_SECRET=your-webhook-secret
+# Bunny Storage Zone (썸네일·아바타용)
+BUNNY_STORAGE_ZONE_NAME=your-storage-zone-name
+BUNNY_STORAGE_PASSWORD=your-storage-zone-api-password
+BUNNY_STORAGE_HOSTNAME=new-movie.b-cdn.net
+# 리전별 스토리지 엔드포인트 (예: sg.storage.bunnycdn.com / ny. / la. / uk. / syd.)
+BUNNY_STORAGE_ENDPOINT=sg.storage.bunnycdn.com
 ALLOWED_ORIGINS=http://localhost:3000
