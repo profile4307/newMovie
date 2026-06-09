@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase'
 import { api } from '@/lib/api'
 import type { User } from '@supabase/supabase-js'
 import { ToastContainer, useToast } from '@/components/ui/Toast'
+import { useSidebar } from '@/components/ui/SidebarContext'
 
 function formatKorean(n: number): string {
   if (n >= 10000) {
@@ -32,6 +33,7 @@ export function Header() {
   const menuRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { toasts, show: showToast, remove: removeToast } = useToast()
+  const { toggle: toggleSidebar } = useSidebar()
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -105,8 +107,19 @@ export function Header() {
         className="hidden"
         onChange={handleAvatarChange}
       />
+      {/* 햄버거 버튼 */}
+      <button
+        onClick={toggleSidebar}
+        className="w-9 h-9 flex items-center justify-center rounded-lg text-white/80 hover:text-white hover:bg-white/20 transition-colors flex-shrink-0"
+        aria-label="메뉴 열기"
+      >
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+
       {/* 로고 */}
-      <Link href="/" className="flex items-center gap-2 flex-shrink-0 w-56">
+      <Link href="/" className="flex items-center gap-2 flex-shrink-0">
         <div className="w-8 h-8 bg-white rounded flex items-center justify-center">
           <svg className="w-5 h-5 text-sky-600" fill="currentColor" viewBox="0 0 24 24">
             <path d="M8 5v14l11-7z" />

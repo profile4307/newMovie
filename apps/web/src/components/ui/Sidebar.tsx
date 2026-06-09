@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useSidebar } from './SidebarContext'
 
 const NAV = [
   {
@@ -26,28 +27,67 @@ const NAV = [
 
 export function Sidebar() {
   const pathname = usePathname()
+  const { open, close } = useSidebar()
 
   return (
-    <aside className="fixed top-14 left-0 h-[calc(100vh-3.5rem)] w-56 bg-white border-r border-sky-200 flex flex-col py-4 z-40">
-      <nav className="flex flex-col gap-1 px-3">
-        {NAV.map(({ href, label, icon }) => {
-          const active = pathname === href
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
-                active
-                  ? 'bg-sky-50 text-sky-600'
-                  : 'text-slate-600 hover:bg-sky-50 hover:text-sky-700'
-              }`}
-            >
-              <span className={active ? 'text-sky-600' : 'text-slate-400'}>{icon}</span>
-              {label}
-            </Link>
-          )
-        })}
-      </nav>
-    </aside>
+    <>
+      {/* 백드롭 */}
+      <div
+        className={`fixed inset-0 z-40 bg-black/40 backdrop-blur-sm transition-opacity duration-300 ${
+          open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        }`}
+        onClick={close}
+        aria-hidden="true"
+      />
+
+      {/* 드로어 */}
+      <aside
+        className={`fixed top-0 left-0 h-full w-64 bg-white z-50 flex flex-col shadow-2xl transition-transform duration-300 ease-in-out ${
+          open ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        {/* 드로어 헤더 */}
+        <div className="h-14 flex items-center justify-between px-4 bg-sky-400 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 bg-white rounded flex items-center justify-center">
+              <svg className="w-4 h-4 text-sky-600" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            </div>
+            <span className="font-bold text-white text-base">NewMovie</span>
+          </div>
+          <button
+            onClick={close}
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-white/80 hover:text-white hover:bg-white/20 transition-colors"
+            aria-label="닫기"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* 네비게이션 */}
+        <nav className="flex flex-col gap-1 px-3 py-4 flex-1">
+          {NAV.map(({ href, label, icon }) => {
+            const active = pathname === href
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={`flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium transition-colors ${
+                  active
+                    ? 'bg-sky-50 text-sky-600'
+                    : 'text-slate-600 hover:bg-sky-50 hover:text-sky-700'
+                }`}
+              >
+                <span className={active ? 'text-sky-500' : 'text-slate-400'}>{icon}</span>
+                {label}
+              </Link>
+            )
+          })}
+        </nav>
+      </aside>
+    </>
   )
 }
