@@ -6,6 +6,7 @@ import { channels } from './routes/channels'
 import { auth } from './routes/auth'
 import { upload } from './routes/upload'
 import { comments } from './routes/comments'
+import { refreshFeedCache } from './lib/feed-cache'
 
 export type Env = {
   ENVIRONMENT: string
@@ -16,7 +17,16 @@ export type Env = {
   BUNNY_STREAM_API_KEY: string
   BUNNY_CDN_HOSTNAME: string
   BUNNY_WEBHOOK_SECRET?: string
+  // Bunny Storage Zone (썸네일·아바타용 — Supabase Storage 대체)
+  BUNNY_STORAGE_ZONE_NAME: string
+  BUNNY_STORAGE_PASSWORD: string
+  BUNNY_STORAGE_HOSTNAME: string
+  BUNNY_STORAGE_ENDPOINT?: string
   ALLOWED_ORIGINS: string
+  // Feed cache
+  FEED_CACHE: KVNamespace
+  FEED_CACHE_TTL_MINUTES: string
+  FEED_CACHE_SIZE: string
 }
 
 const app = new Hono<{ Bindings: Env }>()
@@ -40,4 +50,10 @@ app.route('/api/channels', channels)
 app.route('/api/upload', upload)
 app.route('/api/comments', comments)
 
-export default app
+export default {
+  fetch: app.fetch,
+  // workers-types v4: 첫 인자는 ScheduledController
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(refreshFeedCache(env))
+  },
+}
