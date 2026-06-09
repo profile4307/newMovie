@@ -26,9 +26,22 @@ export function VideoPlayer({ streamUid, customerSubdomain, poster }: Props) {
         hls = new Hls()
         hls.loadSource(hlsUrl)
         hls.attachMedia(video!)
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          video!.play().catch(() => {
+            // 브라우저 자동재생 정책으로 차단된 경우 무음으로 재시도
+            video!.muted = true
+            video!.play().catch(() => {})
+          })
+        })
       } else if (video!.canPlayType('application/vnd.apple.mpegurl')) {
         // Safari 네이티브 HLS
         video!.src = hlsUrl
+        video!.addEventListener('loadedmetadata', () => {
+          video!.play().catch(() => {
+            video!.muted = true
+            video!.play().catch(() => {})
+          })
+        }, { once: true })
       }
     }
 
@@ -44,6 +57,7 @@ export function VideoPlayer({ streamUid, customerSubdomain, poster }: Props) {
       <video
         ref={videoRef}
         controls
+        autoPlay
         poster={poster}
         className="w-full h-full"
         playsInline
