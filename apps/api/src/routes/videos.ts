@@ -66,12 +66,12 @@ app.get(
     // 추천 피드 (기본)
     if (feed === 'trending') {
       // KV 캐시 읽기
-      const cached = await c.env.FEED_CACHE.get<CachedFeed>('feed:trending', 'json')
+      const cached = await c.env.FEED_CACHE?.get<CachedFeed>('feed:trending', 'json')
       if (cached?.data) {
         let result = cached.data
         if (category) result = result.filter((v) => v.category === category)
         const underfilled = category != null && result.length < Math.ceil(limit / 2)
-        const beyondCache = offset >= cached.data.length
+        const beyondCache = offset >= result.length
         if (!underfilled && !beyondCache) {
           return c.json({ data: result.slice(offset, offset + limit), feed, page, limit })
         }
@@ -90,12 +90,12 @@ app.get(
 
     // 최신순
     // KV 캐시 읽기
-    const latestCached = await c.env.FEED_CACHE.get<CachedFeed>('feed:latest', 'json')
+    const latestCached = await c.env.FEED_CACHE?.get<CachedFeed>('feed:latest', 'json')
     if (latestCached?.data) {
       let result = latestCached.data
       if (category) result = result.filter((v) => v.category === category)
       const underfilled = category != null && result.length < Math.ceil(limit / 2)
-      const beyondCache = offset >= latestCached.data.length
+      const beyondCache = offset >= result.length
       if (!underfilled && !beyondCache) {
         return c.json({ data: result.slice(offset, offset + limit), feed, page, limit })
       }
