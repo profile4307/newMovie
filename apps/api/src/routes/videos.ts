@@ -2,19 +2,32 @@ import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
 import { Env } from '../index'
-import { requireAuth, AuthVariables } from '../middleware/auth'
+import { requireAuth, getUserIdFromAuthHeader, AuthVariables } from '../middleware/auth'
 import { createSupabaseClient } from '../lib/supabase'
 import { attachChannels } from '../lib/channels'
-import { CachedFeed } from '../lib/feed-cache'
+import { bunnyStorage } from '../lib/bunny-storage'
+import { CachedFeed, CachedVideo, FeedVideoRow } from '../lib/feed-cache'
+import { isUUID } from '../lib/validation'
+import { r2Enabled, r2PlaybackUrl, deleteR2Prefix, copyVideoToR2 } from '../lib/r2-copy'
 
 type Variables = AuthVariables
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>()
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-function isUUID(v: string) {
-  return UUID_RE.test(v)
+// KV 캐시에서 페이지를 잘라 반환. 캐시 미스 / 비인기 카테고리 (필터 결과 < limit/2) /
+// page 범위 초과 시 null → 호출부에서 DB 폴백.
+function sliceCachedFeed(
+  cached: CachedFeed | null | undefined,
+  category: string | undefined,
+  offset: number,
+  limit: number
+): CachedVideo[] | null {
+  if (!cached?.data) return null
+  let result = cached.data
+  if (category) result = result.filter((v) => v.category === category)
+  if (category != null && result.length < Math.ceil(limit / 2)) return null
+  if (offset >= result.length) return null
+  return result.slice(offset, offset + limit)
 }
 
 // ─── 동영상 목록 (피드) ──────────────────────────────────────────────────────
@@ -37,9 +50,10 @@ app.get(
 
     // 검색은 feed와 무관하게 항상 search_videos RPC
     if (search && search.trim().length > 0) {
-      const { data, error } = await db.rpc<
-        { id: string; title: string; description: string; thumbnail_url: string | null; stream_uid: string; duration: number | null; view_count: number; like_count: number; category: string | null; tags: string[]; created_at: string; channel_id: string }[]
-      >('search_videos', { p_query: search.trim(), p_limit: limit, p_offset: offset })
+      const { data, error } = await db.rpc<FeedVideoRow[]>(
+        'search_videos',
+        { p_query: search.trim(), p_limit: limit, p_offset: offset }
+      )
       if (error) return c.json({ error }, 500)
       const withChannels = await attachChannels(db, data ?? [])
       return c.json({ data: withChannels, feed: 'search', page, limit })
@@ -51,13 +65,13 @@ app.get(
       if (!authHeader?.startsWith('Bearer ')) {
         return c.json({ error: 'Login required', code: 'UNAUTHENTICATED' }, 401)
       }
-      const { createAnonClient } = await import('../lib/supabase')
-      const { userId } = await createAnonClient(c.env).verifyToken(authHeader.slice(7))
+      const userId = await getUserIdFromAuthHeader(c.env, authHeader)
       if (!userId) return c.json({ error: 'Invalid token' }, 401)
 
-      const { data, error } = await db.rpc<
-        { id: string; title: string; description: string; thumbnail_url: string | null; stream_uid: string; duration: number | null; view_count: number; like_count: number; category: string | null; tags: string[]; created_at: string; channel_id: string }[]
-      >('get_subscription_feed', { p_user_id: userId, p_limit: limit, p_offset: offset })
+      const { data, error } = await db.rpc<FeedVideoRow[]>(
+        'get_subscription_feed',
+        { p_user_id: userId, p_limit: limit, p_offset: offset }
+      )
       if (error) return c.json({ error }, 500)
       const withChannels = await attachChannels(db, data ?? [])
       return c.json({ data: withChannels, feed, page, limit })
@@ -65,21 +79,14 @@ app.get(
 
     // 추천 피드 (기본)
     if (feed === 'trending') {
-      // KV 캐시 읽기
       const cached = await c.env.FEED_CACHE?.get<CachedFeed>('feed:trending', 'json')
-      if (cached?.data) {
-        let result = cached.data
-        if (category) result = result.filter((v) => v.category === category)
-        const underfilled = category != null && result.length < Math.ceil(limit / 2)
-        const beyondCache = offset >= result.length
-        if (!underfilled && !beyondCache) {
-          return c.json({ data: result.slice(offset, offset + limit), feed, page, limit })
-        }
-      }
-      // DB 폴백: 캐시 미스 / 비인기 카테고리 (필터 결과 < limit/2) / page 범위 초과
-      const { data, error } = await db.rpc<
-        { id: string; title: string; description: string; thumbnail_url: string | null; stream_uid: string; duration: number | null; view_count: number; like_count: number; category: string | null; tags: string[]; created_at: string; channel_id: string; trend_score: number }[]
-      >('get_trending_videos', { p_limit: limit, p_offset: offset })
+      const cachedPage = sliceCachedFeed(cached, category, offset, limit)
+      if (cachedPage) return c.json({ data: cachedPage, feed, page, limit })
+
+      const { data, error } = await db.rpc<(FeedVideoRow & { trend_score: number })[]>(
+        'get_trending_videos',
+        { p_limit: limit, p_offset: offset }
+      )
       if (error) return c.json({ error }, 500)
 
       let result = data ?? []
@@ -89,24 +96,14 @@ app.get(
     }
 
     // 최신순
-    // KV 캐시 읽기
     const latestCached = await c.env.FEED_CACHE?.get<CachedFeed>('feed:latest', 'json')
-    if (latestCached?.data) {
-      let result = latestCached.data
-      if (category) result = result.filter((v) => v.category === category)
-      const underfilled = category != null && result.length < Math.ceil(limit / 2)
-      const beyondCache = offset >= result.length
-      if (!underfilled && !beyondCache) {
-        return c.json({ data: result.slice(offset, offset + limit), feed, page, limit })
-      }
-    }
-    // DB 폴백: 캐시 미스 / 비인기 카테고리 (필터 결과 < limit/2) / page 범위 초과
+    const latestCachedPage = sliceCachedFeed(latestCached, category, offset, limit)
+    if (latestCachedPage) return c.json({ data: latestCachedPage, feed, page, limit })
+
     let path = `/videos?select=id,title,description,thumbnail_url,stream_uid,duration,view_count,like_count,category,tags,created_at,channel_id&status=eq.published&order=created_at.desc&limit=${limit}&offset=${offset}`
     if (category) path += `&category=eq.${encodeURIComponent(category)}`
 
-    const { data, error } = await db.query<
-      { id: string; title: string; description: string; thumbnail_url: string | null; stream_uid: string; duration: number | null; view_count: number; like_count: number; category: string | null; tags: string[]; created_at: string; channel_id: string }[]
-    >(path)
+    const { data, error } = await db.query<FeedVideoRow[]>(path)
     if (error) return c.json({ error }, 500)
     const withChannels = await attachChannels(db, data ?? [])
     return c.json({ data: withChannels, feed, page, limit })
@@ -172,6 +169,32 @@ app.get('/mine', requireAuth, async (c) => {
   return c.json({ data })
 })
 
+// ─── 기존 영상 R2 백필 (관리자 전용 — docs/r2-serving-design.md Phase 4) ────
+// X-Admin-Key 헤더로 보호. 큐가 있으면 일괄 큐잉, 없으면 호출당 1개씩 동기 복사.
+app.post('/backfill-r2', async (c) => {
+  if (!c.env.ADMIN_API_KEY || c.req.header('X-Admin-Key') !== c.env.ADMIN_API_KEY) {
+    return c.json({ error: 'Not found' }, 404)
+  }
+  if (!r2Enabled(c.env)) return c.json({ error: 'R2 not configured' }, 400)
+
+  const db = createSupabaseClient(c.env)
+  const { data, error } = await db.query<{ stream_uid: string }[]>(
+    `/videos?select=stream_uid&playback_host=eq.bunny&status=in.(published,private,unlisted)&order=created_at.asc&limit=100`
+  )
+  if (error) return c.json({ error }, 500)
+  const uids = (data ?? []).map((v) => v.stream_uid)
+  if (uids.length === 0) return c.json({ queued: 0, remaining: 0 })
+
+  if (c.env.R2_COPY_QUEUE) {
+    await c.env.R2_COPY_QUEUE.sendBatch(uids.map((uid) => ({ body: { uid } })))
+    return c.json({ queued: uids.length })
+  }
+
+  // 큐 미설정: 1개씩 분할 복사 — remaining이 0이 될 때까지 반복 호출
+  const complete = await copyVideoToR2(c.env, uids[0]!)
+  return c.json({ copied: uids[0], complete, remaining: complete ? uids.length - 1 : uids.length })
+})
+
 // ─── 동영상 상세 ─────────────────────────────────────────────────────────────
 app.get('/:id', async (c) => {
   const id = c.req.param('id')
@@ -182,12 +205,14 @@ app.get('/:id', async (c) => {
   type VideoRow = {
     id: string; title: string; description: string; thumbnail_url: string | null
     stream_uid: string; duration: number | null; view_count: number; like_count: number; comment_count: number
-    category: string | null; tags: string[]; created_at: string; status: string
+    category: string | null; tags: string[]; created_at: string; status: string; playback_host?: string
     channel: { id: string; name: string; avatar_url: string | null; subscriber_count: number; owner_id: string; owner: { avatar_url: string | null } | null }
   }
 
+  // playback_host 컬럼은 R2 활성화(= 마이그레이션 적용) 시에만 조회 — 배포 순서 무관하게 동작
+  const playbackCol = r2Enabled(c.env) ? ',playback_host' : ''
   const { data, error } = await db.query<VideoRow[]>(
-    `/videos?select=id,title,description,thumbnail_url,stream_uid,duration,view_count,like_count,comment_count,category,tags,created_at,status,channel:channels(id,name,avatar_url,subscriber_count,owner_id,owner:users!owner_id(avatar_url))&id=eq.${id}&limit=1`
+    `/videos?select=id,title,description,thumbnail_url,stream_uid,duration,view_count,like_count,comment_count,category,tags,created_at,status${playbackCol},channel:channels(id,name,avatar_url,subscriber_count,owner_id,owner:users!owner_id(avatar_url))&id=eq.${id}&limit=1`
   )
 
   if (error) return c.json({ error }, 500)
@@ -197,25 +222,24 @@ app.get('/:id', async (c) => {
 
   // 비공개/일부공개/처리중: 소유자만 접근 가능
   if (video.status !== 'published') {
-    const authHeader = c.req.header('Authorization')
-    let isOwner = false
-    if (authHeader?.startsWith('Bearer ')) {
-      const { createAnonClient } = await import('../lib/supabase')
-      const { userId } = await createAnonClient(c.env).verifyToken(authHeader.slice(7))
-      isOwner = userId === video.channel.owner_id
-    }
-    if (!isOwner) return c.json({ error: 'Not found' }, 404)
+    const userId = await getUserIdFromAuthHeader(c.env, c.req.header('Authorization'))
+    if (userId !== video.channel.owner_id) return c.json({ error: 'Not found' }, 404)
   }
 
   // 조회수 증가는 GET에서 분리됨 → POST /:id/view (클라이언트가 하루 1회만 호출)
 
   // owner_id 제외, avatar_url 없으면 소유자 users.avatar_url로 fallback
-  const { channel: { owner_id: _, owner, ...channelRest }, ...videoPublic } = video
+  const { channel: { owner_id: _, owner, ...channelRest }, playback_host, ...videoPublic } = video
   const channelPublic = {
     ...channelRest,
     avatar_url: channelRest.avatar_url || owner?.avatar_url || null,
   }
-  return c.json({ data: { ...videoPublic, channel: channelPublic } })
+  // 재생 URL — R2로 복사된 영상은 egress 무료인 R2 커스텀 도메인에서 서빙
+  const playback_url =
+    playback_host === 'r2' && r2Enabled(c.env)
+      ? r2PlaybackUrl(c.env, video.stream_uid)
+      : `https://${c.env.BUNNY_CDN_HOSTNAME}/${video.stream_uid}/playlist.m3u8`
+  return c.json({ data: { ...videoPublic, playback_url, channel: channelPublic } })
 })
 
 // ─── 유사 영상 추천 ──────────────────────────────────────────────────────────
@@ -337,14 +361,15 @@ app.delete('/:id', requireAuth, async (c) => {
   const userId = c.get('userId')
   const db = createSupabaseClient(c.env)
 
-  // 소유권 확인 + stream_uid 조회
-  const { data: existing } = await db.query<{ id: string; stream_uid: string; channel: { owner_id: string } }[]>(
-    `/videos?select=id,stream_uid,channel:channels(owner_id)&id=eq.${id}&limit=1`
+  // 소유권 확인 + stream_uid/thumbnail_url 조회
+  const { data: existing } = await db.query<{ id: string; stream_uid: string; thumbnail_url: string | null; channel: { owner_id: string } }[]>(
+    `/videos?select=id,stream_uid,thumbnail_url,channel:channels(owner_id)&id=eq.${id}&limit=1`
   )
   if (!existing || existing.length === 0) return c.json({ error: 'Not found' }, 404)
   if (existing[0]!.channel.owner_id !== userId) return c.json({ error: 'Forbidden' }, 403)
 
   const streamUid = existing[0]!.stream_uid
+  const thumbnailUrl = existing[0]!.thumbnail_url
 
   // DB에서 삭제 (cascade로 likes, comments 등 자동 삭제)
   const { error } = await db.query(`/videos?id=eq.${id}`, { method: 'DELETE' })
@@ -357,6 +382,15 @@ app.delete('/:id', requireAuth, async (c) => {
       { method: 'DELETE', headers: { AccessKey: c.env.BUNNY_STREAM_API_KEY } }
     )
   )
+
+  // 커스텀 썸네일이 Bunny Storage에 있으면 함께 삭제 (Bunny 자동 썸네일은 Stream 삭제로 정리됨)
+  const storagePrefix = `https://${c.env.BUNNY_STORAGE_HOSTNAME}/`
+  if (thumbnailUrl?.startsWith(storagePrefix)) {
+    c.executionCtx.waitUntil(bunnyStorage(c.env).remove(thumbnailUrl.slice(storagePrefix.length)))
+  }
+
+  // R2로 복사된 HLS 파일도 정리 (R2 미설정 시 no-op)
+  c.executionCtx.waitUntil(deleteR2Prefix(c.env, streamUid))
 
   return c.json({ success: true })
 })

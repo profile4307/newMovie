@@ -4,16 +4,11 @@ import { z } from 'zod'
 import { Env } from '../index'
 import { requireAuth, AuthVariables } from '../middleware/auth'
 import { createSupabaseClient } from '../lib/supabase'
+import { isUUID } from '../lib/validation'
 
 type Variables = AuthVariables
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>()
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-function isUUID(v: string) {
-  return UUID_RE.test(v)
-}
 
 // 댓글 목록
 app.get(

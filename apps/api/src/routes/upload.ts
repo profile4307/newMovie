@@ -3,6 +3,7 @@ import { Env } from '../index'
 import { requireAuth, AuthVariables } from '../middleware/auth'
 import { createSupabaseClient } from '../lib/supabase'
 import { bunnyStorage } from '../lib/bunny-storage'
+import { enqueueR2Copy } from '../lib/r2-copy'
 
 type Variables = AuthVariables
 
@@ -23,6 +24,37 @@ function bunnyStatusToState(status: number): string {
   if (status === 4) return 'ready'
   if (status === 5 || status === 6) return 'error'
   return 'processing'
+}
+
+// 트랜스코딩 완료 → target_status로 전환 (stream-status 폴링·웹훅 공용).
+// status=eq.processing 가드: 이미 전환된 영상을 폴링/웹훅 재호출이 덮어쓰지 않도록 1회만 적용.
+async function finalizeTranscodedVideo(
+  env: Env,
+  uid: string,
+  info: { duration?: number; bunnyThumbnail?: string },
+  ctx: ExecutionContext
+): Promise<void> {
+  const db = createSupabaseClient(env)
+  const { data: videos } = await db.query<{ target_status: string; thumbnail_url: string | null }[]>(
+    `/videos?select=target_status,thumbnail_url&stream_uid=eq.${uid}&status=eq.processing&limit=1`
+  )
+  if (!videos || videos.length === 0) return // 이미 전환됐거나 없는 영상
+
+  const targetStatus = videos[0]!.target_status ?? 'published'
+  // 사용자가 직접 업로드한 썸네일이 있으면 Bunny 자동 썸네일로 덮어쓰지 않음
+  const thumbnailUrl = videos[0]!.thumbnail_url ?? info.bunnyThumbnail
+
+  await db.query(`/videos?stream_uid=eq.${uid}&status=eq.processing`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      status: targetStatus,
+      duration: info.duration,
+      ...(thumbnailUrl ? { thumbnail_url: thumbnailUrl } : {}),
+    }),
+  })
+
+  // HLS 파일을 R2로 복사해 전송비 없는 서빙으로 전환 (R2 미설정 시 no-op)
+  await enqueueR2Copy(env, uid, ctx)
 }
 
 // Bunny 비디오 생성 + tus 인증 정보 발급
@@ -120,26 +152,12 @@ app.get('/stream-status/:uid', requireAuth, async (c) => {
 
   // 트랜스코딩 완료 시 target_status로 전환
   if (state === 'ready') {
-    const db = createSupabaseClient(c.env)
-    const { data: videos } = await db.query<{ target_status: string; thumbnail_url: string | null }[]>(
-      `/videos?select=target_status,thumbnail_url&stream_uid=eq.${uid}&limit=1`
-    )
-    const targetStatus = videos?.[0]?.target_status ?? 'published'
-    // 사용자가 직접 업로드한 썸네일이 있으면 Bunny 자동 썸네일로 덮어쓰지 않음
-    const existingThumbnail = videos?.[0]?.thumbnail_url
-    const bunnyThumbnail = video.thumbnailFileName
-      ? `https://${c.env.BUNNY_CDN_HOSTNAME}/${uid}/${video.thumbnailFileName}`
-      : undefined
-    const thumbnailUrl = existingThumbnail ?? bunnyThumbnail
-
-    await db.query(`/videos?stream_uid=eq.${uid}`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        status: targetStatus,
-        duration: video.length ? Math.floor(video.length) : undefined,
-        ...(thumbnailUrl ? { thumbnail_url: thumbnailUrl } : {}),
-      }),
-    })
+    await finalizeTranscodedVideo(c.env, uid, {
+      duration: video.length ? Math.floor(video.length) : undefined,
+      bunnyThumbnail: video.thumbnailFileName
+        ? `https://${c.env.BUNNY_CDN_HOSTNAME}/${uid}/${video.thumbnailFileName}`
+        : undefined,
+    }, c.executionCtx)
   }
 
   return c.json({
@@ -188,21 +206,7 @@ app.post('/webhook', async (c) => {
       duration = info.length ? Math.floor(info.length) : undefined
     }
 
-    const db = createSupabaseClient(c.env)
-    const { data: videos } = await db.query<{ target_status: string; thumbnail_url: string | null }[]>(
-      `/videos?select=target_status,thumbnail_url&stream_uid=eq.${uid}&limit=1`
-    )
-    const targetStatus = videos?.[0]?.target_status ?? 'published'
-    // 사용자가 직접 업로드한 썸네일이 있으면 Bunny 자동 썸네일로 덮어쓰지 않음
-    const finalThumbnail = videos?.[0]?.thumbnail_url ?? thumbnailUrl
-    await db.query(`/videos?stream_uid=eq.${uid}`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        status: targetStatus,
-        duration,
-        ...(finalThumbnail ? { thumbnail_url: finalThumbnail } : {}),
-      }),
-    })
+    await finalizeTranscodedVideo(c.env, uid, { duration, bunnyThumbnail: thumbnailUrl }, c.executionCtx)
   }
 
   return c.json({ ok: true })

@@ -111,6 +111,10 @@ create table if not exists videos (
   view_count      bigint not null default 0,
   like_count      bigint not null default 0,
   comment_count   integer not null default 0,
+  -- R2 HLS 서빙 전환 상태 (docs/r2-serving-design.md)
+  playback_host   text not null default 'bunny' check (playback_host in ('bunny', 'r2')),
+  r2_copied_at    timestamptz,           -- R2 복사 완료 시각 (유예 후 Bunny 원본 삭제 기준)
+  bunny_purged    boolean not null default false,  -- Bunny 원본 삭제 완료 여부
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
@@ -118,6 +122,9 @@ create table if not exists videos (
 create index if not exists videos_channel_id_idx on videos(channel_id);
 create index if not exists videos_status_created_at_idx on videos(status, created_at desc);
 create index if not exists videos_category_idx on videos(category) where status = 'published';
+-- purge cron 조회용 (R2 전환됐지만 아직 Bunny 원본이 남은 영상)
+create index if not exists videos_r2_purge_idx
+  on videos(r2_copied_at) where playback_host = 'r2' and bunny_purged = false;
 
 -- array_to_string은 STABLE이라 generated column / 인덱스 표현식에 사용 불가
 -- IMMUTABLE 래퍼를 먼저 만들어 우회

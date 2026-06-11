@@ -12,3 +12,7 @@ BUNNY_STORAGE_HOSTNAME=new-movie.b-cdn.net
 # 리전별 스토리지 엔드포인트 (예: sg.storage.bunnycdn.com / ny. / la. / uk. / syd.)
 BUNNY_STORAGE_ENDPOINT=sg.storage.bunnycdn.com
 ALLOWED_ORIGINS=http://localhost:3000
+# R2 HLS 서빙 (선택 — wrangler.toml의 MEDIA_BUCKET 바인딩과 함께 설정, docs/r2-serving-design.md)
+# MEDIA_BASE_URL=http://localhost:8787/media
+# 기존 영상 백필 라우트(POST /api/videos/backfill-r2) 보호 키 (선택)
+# ADMIN_API_KEY=your-admin-key

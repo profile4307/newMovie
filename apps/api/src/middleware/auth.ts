@@ -6,6 +6,16 @@ export type AuthVariables = {
   userId: string
 }
 
+// 선택적 인증 — 토큰이 없거나 유효하지 않으면 null (보호 라우트는 requireAuth 사용)
+export async function getUserIdFromAuthHeader(
+  env: Env,
+  authHeader: string | undefined
+): Promise<string | null> {
+  if (!authHeader?.startsWith('Bearer ')) return null
+  const { userId } = await createAnonClient(env).verifyToken(authHeader.slice(7))
+  return userId
+}
+
 export const requireAuth = createMiddleware<{
   Bindings: Env
   Variables: AuthVariables

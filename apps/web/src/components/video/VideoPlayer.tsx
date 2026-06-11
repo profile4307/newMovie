@@ -1,20 +1,23 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 type Props = {
   streamUid: string
   customerSubdomain: string  // Bunny CDN 호스트명 (하위 호환 prop명 유지)
+  playbackUrl?: string       // API가 내려준 재생 URL (Bunny/R2 서빙 호스트 반영) — 있으면 우선
   poster?: string
 }
 
-export function VideoPlayer({ streamUid, customerSubdomain, poster }: Props) {
+export function VideoPlayer({ streamUid, customerSubdomain, playbackUrl, poster }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  // 클릭-투-플레이: 재생 버튼을 누르기 전에는 스트림을 한 바이트도 받지 않음 (전송비 절감)
+  const [started, setStarted] = useState(false)
 
-  // Bunny Stream HLS URL
-  const hlsUrl = `https://${customerSubdomain}/${streamUid}/playlist.m3u8`
+  const hlsUrl = playbackUrl ?? `https://${customerSubdomain}/${streamUid}/playlist.m3u8`
 
   useEffect(() => {
+    if (!started) return
     const video = videoRef.current
     if (!video) return
 
@@ -24,9 +27,17 @@ export function VideoPlayer({ streamUid, customerSubdomain, poster }: Props) {
     async function initHls() {
       const Hls = (await import('hls.js')).default
       if (Hls.isSupported()) {
-        // 버퍼 상한 — 이탈 시 미리 받은 세그먼트 낭비(Bunny 전송비) 차단.
-        // 더 공격적으로 줄이려면 15/30. 리버퍼 위험과 트레이드오프.
-        hls = new Hls({ maxBufferLength: 30, maxMaxBufferLength: 60 })
+        hls = new Hls({
+          // 버퍼 상한 — 이탈 시 미리 받은 세그먼트 낭비(Bunny 전송비) 차단.
+          // 리버퍼가 잦으면 30/60으로 되돌릴 것.
+          maxBufferLength: 15,
+          maxMaxBufferLength: 30,
+          // 플레이어 표시 크기보다 높은 해상도는 받지 않음 — 모바일·작은 창에서 전송량 대폭 절감
+          capLevelToPlayerSize: true,
+          // 최저 화질로 시작 후 ABR이 끌어올림 — 초기 전송량·시작 지연 최소화.
+          // 첫 1~2 세그먼트의 화질 저하가 거슬리면 -1(자동)로 변경.
+          startLevel: 0,
+        })
         hls.loadSource(hlsUrl)
         hls.attachMedia(video!)
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -53,18 +64,37 @@ export function VideoPlayer({ streamUid, customerSubdomain, poster }: Props) {
     return () => {
       hls?.destroy()
     }
-  }, [hlsUrl])
+  }, [hlsUrl, started])
 
   return (
     <div className="relative w-full bg-black aspect-video rounded-lg overflow-hidden">
-      <video
-        ref={videoRef}
-        controls
-        autoPlay
-        poster={poster}
-        className="w-full h-full"
-        playsInline
-      />
+      {started ? (
+        <video
+          ref={videoRef}
+          controls
+          poster={poster}
+          className="w-full h-full"
+          playsInline
+        />
+      ) : (
+        <button
+          onClick={() => setStarted(true)}
+          className="group absolute inset-0 w-full h-full"
+          aria-label="동영상 재생"
+        >
+          {poster && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={poster} alt="" className="absolute inset-0 w-full h-full object-cover" />
+          )}
+          <span className="absolute inset-0 flex items-center justify-center">
+            <span className="w-16 h-16 rounded-full bg-black/60 group-hover:bg-sky-500/90 transition-colors flex items-center justify-center">
+              <svg className="w-8 h-8 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            </span>
+          </span>
+        </button>
+      )}
     </div>
   )
 }

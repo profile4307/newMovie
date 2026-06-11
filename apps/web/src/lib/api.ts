@@ -34,6 +34,7 @@ export type Video = {
   title: string
   description: string
   stream_uid: string
+  playback_url?: string // 상세 API만 제공 — 서빙 호스트(Bunny/R2)가 반영된 HLS URL
   thumbnail_url: string | null
   duration: number | null
   view_count: number

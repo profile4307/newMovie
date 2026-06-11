@@ -4,16 +4,11 @@ import { z } from 'zod'
 import { Env } from '../index'
 import { requireAuth, AuthVariables } from '../middleware/auth'
 import { createSupabaseClient } from '../lib/supabase'
+import { isUUID } from '../lib/validation'
 
 type Variables = AuthVariables
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>()
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-function isUUID(v: string) {
-  return UUID_RE.test(v)
-}
 
 // 내 채널 조회 (/:id 앞에 위치해야 함)
 app.get('/mine', requireAuth, async (c) => {

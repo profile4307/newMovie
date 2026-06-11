@@ -7,6 +7,8 @@ compatibility_flags = ["nodejs_compat"]
 ENVIRONMENT = "development"
 FEED_CACHE_TTL_MINUTES = "30"   # 캐시 갱신 주기(분) — [triggers].crons 와 함께 수정
 FEED_CACHE_SIZE = "50"           # 캐시할 영상 수 (카테고리 필터 여유분)
+# R2 HLS 재생 URL prefix — 커스텀 도메인이 없어 이 Worker의 /media 프록시로 서빙
+MEDIA_BASE_URL = "https://newmovie-api.profile4307.workers.dev/media"
 
 # KV namespace for feed caching
 # 처음 설정 시: npx wrangler kv namespace create FEED_CACHE
@@ -19,7 +21,20 @@ preview_id = "d24fb193878a43e39ab6b4778f24717f"  # 로컬 개발(wrangler dev)�
 [triggers]
 crons = ["*/30 * * * *"]   # FEED_CACHE_TTL_MINUTES 변경 시 함께 수정
 
-# R2 bucket for original video storage
-# [[r2_buckets]]
-# binding = "VIDEO_BUCKET"
-# bucket_name = "newmovie-videos"
+# ─── R2 HLS 서빙 (전송비 절감 — docs/r2-serving-design.md) ───
+# 영상 HLS 파일을 R2에 복사해 egress 무료로 서빙. 신규 업로드는 트랜스코딩 완료 시
+# 자동 큐잉, 기존 영상은 POST /api/videos/backfill-r2 (X-Admin-Key 헤더).
+# 커스텀 도메인 확보 시: R2 버킷에 도메인 연결(Cache Everything) 후
+# [vars].MEDIA_BASE_URL을 그 도메인으로 교체하면 /media 프록시 없이 직접 서빙.
+[[r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "newmovie-media"
+
+[[queues.producers]]
+queue = "r2-copy"
+binding = "R2_COPY_QUEUE"
+
+[[queues.consumers]]
+queue = "r2-copy"
+max_batch_size = 1   # 무료 플랜 invocation당 subrequest 50개 한도 — 영상 1개씩 분할 복사
+max_retries = 5

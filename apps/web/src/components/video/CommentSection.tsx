@@ -81,9 +81,13 @@ function ReplySection({
 
   async function deleteReply(id: string) {
     if (!confirm('이 답글을 삭제하시겠습니까?')) return
-    await api.comments.delete(id)
-    setReplies((prev) => prev.filter((r) => r.id !== id))
-    onCountChange(-1)
+    try {
+      await api.comments.delete(id)
+      setReplies((prev) => prev.filter((r) => r.id !== id))
+      onCountChange(-1)
+    } catch {
+      alert('답글 삭제에 실패했습니다. 잠시 후 다시 시도해주세요.')
+    }
   }
 
   return (
@@ -292,9 +296,13 @@ export function CommentSection({ videoId, initialCommentCount = 0 }: { videoId: 
 
   async function deleteComment(id: string) {
     if (!confirm('이 댓글을 삭제하시겠습니까?')) return
-    await api.comments.delete(id)
-    setComments((prev) => prev.filter((c) => c.id !== id))
-    setCommentCount((n) => Math.max(0, n - 1))
+    try {
+      await api.comments.delete(id)
+      setComments((prev) => prev.filter((c) => c.id !== id))
+      setCommentCount((n) => Math.max(0, n - 1))
+    } catch {
+      alert('댓글 삭제에 실패했습니다. 잠시 후 다시 시도해주세요.')
+    }
   }
 
   return (

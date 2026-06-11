@@ -2,7 +2,7 @@ import { Env } from '../index'
 import { createSupabaseClient } from './supabase'
 import { attachChannels } from './channels'
 
-type FeedVideoRow = {
+export type FeedVideoRow = {
   id: string
   title: string
   description: string
