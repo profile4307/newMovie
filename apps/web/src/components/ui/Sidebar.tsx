@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useSidebar } from './SidebarContext'
+import { DEPLOY_VERSION } from '@/lib/version'
 
 const NAV = [
   {
@@ -87,6 +88,11 @@ export function Sidebar() {
             )
           })}
         </nav>
+
+        {/* 배포 버전 (배포 반영 여부 육안 확인용) — 하단 좌측 */}
+        <div className="px-4 py-3 border-t border-slate-100 flex-shrink-0">
+          <p className="text-[11px] text-slate-400 tabular-nums">배포 {DEPLOY_VERSION}</p>
+        </div>
       </aside>
     </>
   )

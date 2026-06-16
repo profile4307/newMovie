@@ -26,6 +26,9 @@ taskkill //F //IM node.exe
 cd apps/api && npx wrangler deploy   # API(Cloudflare Workers) 배포
 # 웹 배포: git push origin master → Workers Builds CI가 자동 빌드·배포
 #   (로컬 `pnpm run deploy`는 Windows에서 .open-next 권한 오류로 실패 — 사용 금지)
+# 푸시는 항상 `pnpm release ["메시지"]` 사용 — 푸시 직전 배포 버전(KST)을
+#   apps/web/src/lib/version.ts에 자동 기록(사이드바 하단 표시) 후 add·commit·push.
+#   일반 `git push`는 배포 버전이 갱신되지 않으므로 지양 (scripts/release.mjs).
 # Workers 환경변수(secrets) 등록 — .dev.vars 추가 후 배포 전 필수
 cd apps/api && npx wrangler secret put <VAR_NAME>
 # 큐 생성: npx -y wrangler@4 queues create <name> --message-retention-period-secs 86400

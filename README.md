@@ -8,7 +8,7 @@
 |------|------|
 | 웹 | https://new-movie.profile4307.workers.dev |
 | API | https://newmovie-api.profile4307.workers.dev |
-| 아키텍처·데이터 흐름도 | https://new-movie.profile4307.workers.dev/architecture.html |
+| 아키텍처·데이터 흐름도 | https://new-movie.profile4307.workers.dev/architecture |
 
 ## 기술 스택
 
@@ -143,7 +143,7 @@ newMovie/
 └── docs/          # R2 서빙 설계·커스텀 도메인 가이드
 ```
 
-> **API·데이터 흐름과 전체 엔드포인트 목록은 [흐름도](https://new-movie.profile4307.workers.dev/architecture.html)에서 확인**하세요. 피드 파라미터: `?feed=trending`(기본)·`subscriptions`·`latest`.
+> **API·데이터 흐름과 전체 엔드포인트 목록은 [흐름도](https://new-movie.profile4307.workers.dev/architecture)에서 확인**하세요. 피드 파라미터: `?feed=trending`(기본)·`subscriptions`·`latest`.
 
 ## 추천 점수 알고리즘
 
