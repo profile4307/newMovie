@@ -20,11 +20,14 @@
 | 데이터베이스 | Supabase (PostgreSQL + RLS) | 무료 ~ $25/월 |
 | 인증 | Supabase Auth (이메일 + Google OAuth) | 무료 |
 | 이미지 저장 (썸네일·아바타) | Bunny Storage Zone + CDN | ~$0.01/GB |
-| 동영상 저장/전송 | Bunny Stream | ~$0.005/1,000분 저장 + $0.009~$0.045/GB 전송 |
+| 동영상 트랜스코딩 | Bunny Stream (트랜스코딩 + HLS 생성) | 트랜스코딩 무료 · R2 복사 후 7일 뒤 원본 삭제 |
+| 동영상 저장/전송 | Cloudflare R2 (HLS 서빙) | 저장 ~$0.015/GB · **egress 무료** |
 
 ## 주요 기능
 
 - **동영상 업로드** — Bunny Stream tus 직접 업로드, 자동 트랜스코딩, HLS 스트리밍
+- **R2 HLS 서빙 (전송비 0)** — 트랜스코딩 완료 후 HLS 파일을 Cloudflare R2로 복사해 egress 무료로 서빙. 신규 업로드는 큐(`r2-copy`)가 자동 처리하고, 7일 유예 후 Bunny 원본을 삭제. 영상별 `playback_host`로 점진 전환·롤백 ([설계](docs/r2-serving-design.md))
+- **재생 전송량 절감** — 클릭-투-플레이(재생 전 0 byte), 화면 크기에 맞춘 화질(`capLevelToPlayerSize`), 버퍼 상한으로 이탈 시 낭비 차단
 - **공개 설정** — 전체공개 / 일부공개(링크 공유) / 비공개, 업로드 및 이후 변경 가능
 - **메인 피드 캐싱** — 추천·최신 피드를 Cron Trigger로 주기적으로(기본 30분) 미리 만들어 Workers KV에 저장 → 매 요청마다의 DB 조회를 제거해 트래픽·비용 절감 (캐시 미스/비인기 카테고리는 DB 폴백)
 - **Google 로그인** — Supabase Auth OAuth, 클라이언트 `/auth/callback`에서 세션 설정
@@ -84,7 +87,19 @@ create policy "본인 파일 수정" on storage.objects for update to authentica
 4. 생성된 **Pull Zone** 호스트명 확인 (예: `vz-xxxx.b-cdn.net`)
 5. Stream 라이브러리 → **Security** → **Block direct url file access** **비활성화** (썸네일/영상 403 방지)
 
-### 4. 환경변수 설정
+### 4. Cloudflare R2 설정 (HLS 서빙 — 선택, 미설정 시 Bunny CDN 서빙)
+
+R2 바인딩이 없으면 자동으로 Bunny CDN에서 서빙하므로 **로컬 개발에는 생략 가능**합니다. 프로덕션에서 전송비를 없애려면:
+
+```bash
+cd apps/api
+npx wrangler r2 bucket create newmovie-media
+npx -y wrangler@4 queues create r2-copy --message-retention-period-secs 86400
+```
+
+그 후 [`apps/api/wrangler.toml`](apps/api/wrangler.toml)의 `[[r2_buckets]]`·`[[queues.*]]` 바인딩과 `MEDIA_BASE_URL`이 설정돼 있는지 확인합니다. 커스텀 도메인 없이 API Worker의 `/media` 프록시로 서빙하며, 차후 커스텀 도메인 연결은 [`docs/r2-custom-domain-setup.md`](docs/r2-custom-domain-setup.md) 참고. 기존 영상 일괄 전환은 `POST /api/videos/backfill-r2` (`X-Admin-Key` 헤더, `ADMIN_API_KEY` secret 필요).
+
+### 5. 환경변수 설정
 
 **프론트엔드** — `apps/web/.env.local` 생성:
 
@@ -111,11 +126,16 @@ BUNNY_STORAGE_PASSWORD=your-storage-zone-api-password
 BUNNY_STORAGE_HOSTNAME=your-pull-zone.b-cdn.net
 BUNNY_STORAGE_ENDPOINT=sg.storage.bunnycdn.com
 ALLOWED_ORIGINS=http://localhost:3000
+# R2 HLS 서빙 (선택 — 미설정 시 Bunny CDN 서빙)
+# MEDIA_BASE_URL=http://localhost:8787/media   # 프로덕션은 API Worker URL + /media
+# ADMIN_API_KEY=...                             # POST /api/videos/backfill-r2 보호용
 ```
+
+> `MEDIA_BUCKET`(R2)·`R2_COPY_QUEUE`(Queue) 바인딩은 [`wrangler.toml`](apps/api/wrangler.toml)에서 관리합니다. `MEDIA_BASE_URL`이 비어 있으면 R2 서빙이 비활성화되고 Bunny CDN으로 폴백합니다.
 
 > 피드 캐시 설정(`FEED_CACHE_TTL_MINUTES`, `FEED_CACHE_SIZE`)과 Cron 주기는 `apps/api/wrangler.toml`에서 관리합니다. 로컬에서 Cron을 테스트하려면 `npx wrangler dev --test-scheduled` 후 `curl "http://localhost:8787/__scheduled?cron=*/30+*+*+*+*"`로 캐시를 워밍합니다 (KV 바인딩이 없으면 자동 DB 폴백).
 
-### 5. 개발 서버 실행
+### 6. 개발 서버 실행
 
 ```bash
 # 터미널 1 — API (http://localhost:8787)
@@ -140,11 +160,19 @@ npx wrangler kv namespace create FEED_CACHE --preview
 npx wrangler secret put SUPABASE_URL          # 그 외 SUPABASE_*, BUNNY_*, ALLOWED_ORIGINS 모두
 npx wrangler secret put ALLOWED_ORIGINS        # 예: https://new-movie.<sub>.workers.dev,http://localhost:3000
 
-# 배포 (Cron Trigger */30 * * * * 와 FEED_CACHE 바인딩이 wrangler.toml에서 함께 등록됨)
+# R2 HLS 서빙 (선택): 버킷 + 큐 생성 후 ADMIN_API_KEY 등록
+npx wrangler r2 bucket create newmovie-media
+npx -y wrangler@4 queues create r2-copy --message-retention-period-secs 86400
+npx wrangler secret put ADMIN_API_KEY          # 기존 영상 백필 라우트 보호용
+
+# 배포 (Cron Trigger */30 * * * * 와 FEED_CACHE·MEDIA_BUCKET·R2_COPY_QUEUE 바인딩이 wrangler.toml에서 함께 등록됨)
 npx wrangler deploy
+
+# (선택) 기존 영상 일괄 R2 전환 — remaining이 0이 될 때까지 반복 호출
+curl -X POST https://<api-worker-url>/api/videos/backfill-r2 -H "X-Admin-Key: <ADMIN_API_KEY>"
 ```
 
-> `wrangler.toml`의 `[vars]`(ENVIRONMENT, FEED_CACHE_*)는 배포 시 자동 반영됩니다. 비밀값(`SUPABASE_*`, `BUNNY_*`, `ALLOWED_ORIGINS`)만 `wrangler secret put`으로 등록하세요.
+> `wrangler.toml`의 `[vars]`(ENVIRONMENT, FEED_CACHE_*, MEDIA_BASE_URL)는 배포 시 자동 반영됩니다. 비밀값(`SUPABASE_*`, `BUNNY_*`, `ALLOWED_ORIGINS`, `ADMIN_API_KEY`)만 `wrangler secret put`으로 등록하세요.
 
 ### Cloudflare Workers (프론트엔드 — OpenNext)
 
@@ -183,14 +211,18 @@ newMovie/
 │   │   ├── open-next.config.ts  # OpenNext (Cloudflare) 빌드 설정
 │   │   └── wrangler.jsonc       # 웹 Worker 설정
 │   └── api/                  # Cloudflare Workers API
-│       ├── wrangler.toml     # KV 바인딩 + Cron Trigger + 피드 캐시 설정
+│       ├── wrangler.toml     # KV·R2·Queue 바인딩 + Cron Trigger + 피드 캐시 설정
 │       └── src/
+│           ├── index.ts      # 진입점 + /media R2 프록시 + 큐 컨슈머 + Cron
 │           ├── routes/       # videos, channels, upload, comments, auth
 │           ├── middleware/   # 인증 미들웨어
-│           └── lib/          # supabase(fetch), feed-cache(KV 갱신), channels, bunny-storage
-└── packages/
-    └── db/
-        └── schema.sql        # PostgreSQL 스키마 + RPC 함수
+│           └── lib/          # supabase(fetch), feed-cache(KV 갱신), channels, bunny-storage, r2-copy(R2 서빙)
+├── packages/
+│   └── db/
+│       ├── schema.sql        # PostgreSQL 스키마 + RPC 함수
+│       └── migrations/       # 증분 마이그레이션 (예: R2 playback 컬럼)
+├── docs/                     # R2 서빙 설계·커스텀 도메인 가이드
+└── architecture.html         # API·데이터 흐름도 (브라우저로 열람)
 ```
 
 ## API 엔드포인트
@@ -202,6 +234,7 @@ newMovie/
 | GET | `/api/videos/:id` | 동영상 상세 | - |
 | GET | `/api/videos/:id/related` | 관련 영상 | - |
 | POST | `/api/videos` | 동영상 등록 | ✅ |
+| POST | `/api/videos/backfill-r2` | 기존 영상 R2 일괄 전환 | 🔑 X-Admin-Key |
 | PUT | `/api/videos/:id` | 동영상 수정 | ✅ |
 | DELETE | `/api/videos/:id` | 동영상 삭제 | ✅ |
 | POST | `/api/videos/:id/like` | 좋아요 토글 | ✅ |
@@ -221,6 +254,7 @@ newMovie/
 | GET | `/api/auth/me` | 내 프로필 | ✅ |
 | POST | `/api/auth/profile` | 프로필 생성/수정 | ✅ |
 | POST | `/api/auth/avatar` | 프로필 사진 업로드 | ✅ |
+| GET | `/media/*` | R2 HLS 파일 프록시 (CORS·캐시·Range) | - |
 
 피드 파라미터: `?feed=trending` (기본) / `?feed=subscriptions` / `?feed=latest`
 
@@ -234,50 +268,46 @@ newMovie/
 
 ## 비용 추정
 
-> 모든 수치는 **추정치**입니다. 실제 비용은 시청 패턴·화질 분포·시청자 지역에 따라 크게 달라집니다.
+> 모든 수치는 **추정치**입니다. 실제 비용은 시청 패턴·화질 분포·캐시 적중률에 따라 달라집니다.
+> **R2 HLS 서빙 전환으로 영상 전송비(egress)가 제거**되어, 이전의 지배적 비용 항목(Bunny 전송, 시청자 지역별 $0.01~$0.06/GB)이 사라졌습니다.
 
 ### 단가 (2026, 공식 기준)
 
 | 항목 | 단가 |
 |------|------|
-| Bunny Stream — 저장 | **$0.005 / GB·월** (단일 리전) |
-| Bunny Stream — 전송 | **$0.01/GB** (유럽·북미) · **$0.03/GB** (아시아·오세아니아) · **$0.045/GB** (남미) · **$0.06/GB** (중동·아프리카) |
-| Bunny Stream — 트랜스코딩 | **무료** (포함) |
+| **Cloudflare R2 — egress (영상 전송)** | **$0 (무료)** ← 핵심 |
+| Cloudflare R2 — 저장 | **$0.015 / GB·월** |
+| Cloudflare R2 — 요청 | 쓰기(Class A) $4.50/백만 · 읽기(Class B) $0.36/백만 (엣지 캐시 적중분 제외) |
+| Bunny Stream — 트랜스코딩 | **무료** · 저장은 R2 복사 후 7일 뒤 원본 삭제로 거의 0 |
 | Bunny Storage — 이미지(썸네일·아바타) | **$0.01 / GB·월** + CDN 전송(미미) |
-| Cloudflare Workers (웹 SSR + API) | 무료 **100k req/일** (~월 300만), 초과 시 Workers Paid **$5/월** + $0.30/백만 |
+| Cloudflare Workers (웹 SSR + API + `/media` 프록시) | 무료 **100k req/일** (~월 300만), 초과 시 Workers Paid **$5/월** + $0.30/백만 |
 | Cloudflare Workers KV (피드 캐시) | 무료 **읽기 100k/일**, 초과 시 $0.50/백만 |
 | Supabase | 무료 한도(DB 500MB·egress 5GB·MAU 50k) 내 **$0**, 초과 시 Pro **$25/월** |
 
 ### 가정
 
-- 영상 길이 **최대 3분**(앱 제한), 시청 1회당 평균 **~50 MB** 전송 (720p 적응형 HLS, 부분 시청·화질 혼합 반영)
-- 영상 1개당 저장 **~120 MB** (360p/720p/1080p 다중 렌디션 HLS)
-- 썸네일·아바타는 용량·전송 모두 **무시 가능 수준** (영상당 < 0.5 MB)
-- 시청 1회당 Cloudflare 요청 ~5건 (웹 SSR 1 + API 4 + KV 읽기 1)
-- 전송 단가는 **아시아·한국 기준 $0.03/GB** 적용 (괄호 안은 유럽·북미 $0.01/GB)
+- 영상 길이 **최대 3분**(앱 제한), 영상 1개당 저장 **~120 MB** (다중 렌디션 HLS)
+- 시청 1회당 평균 **~50 MB** 전송 → **R2 egress 무료라 비용 0**
+- **현재 `/media` 프록시 서빙**: 시청 1회당 HLS 세그먼트 요청 **~40건이 Worker 요청을 소비**(무료 10만/일 ≈ 하루 ~2,000회 시청 분기점). 커스텀 도메인 연결 시 엣지에서 직접 서빙되어 이 부담이 사라짐 ([가이드](docs/r2-custom-domain-setup.md))
+- 썸네일·아바타는 용량·전송 모두 **무시 가능 수준**
 
-### 계산식
-
-```
-월 비용 ≈ Bunny 전송 + Bunny 저장 + Cloudflare + Supabase
-  Bunny 전송 = 월 시청수 × 0.05 GB × 지역단가
-  Bunny 저장 = 누적 영상수 × 0.12 GB × $0.005
-```
-
-### 시나리오별 월 비용 (아시아 기준, 괄호 = 유럽·북미)
+### 시나리오별 월 비용 (지역 무관 — egress 무료)
 
 | 항목 | 초기<br>(영상 100 · 시청 2만 · MAU 1천) | 성장<br>(영상 1천 · 시청 30만 · MAU 1.5만) | 대규모<br>(영상 1만 · 시청 300만 · MAU 10만) |
 |------|------|------|------|
-| Bunny 전송 | 1,000 GB → **$30** ($10) | 15 TB → **$450** ($150) | 150 TB → **$4,500** ($1,500) |
-| Bunny 저장 | 12 GB → $0.06 | 120 GB → $0.6 | 1,200 GB → $6 |
+| R2 영상 전송 (egress) | **$0** | **$0** | **$0** |
+| R2 저장 | 12 GB → $0.2 | 120 GB → $2 | 1,200 GB → $18 |
+| R2 요청 (쓰기+읽기) | ~$0 | ~$1 | ~$12 |
 | 이미지 저장 | ~$0 | ~$0.1 | ~$1 |
-| Cloudflare (Workers+KV) | $0 (무료) | $5 | ~$7 |
+| Cloudflare Workers+KV | $0 (무료) | $5 | $5~$40 ※ |
 | Supabase | $0 (무료) | $0~$25 | $25 |
-| **합계** | **~$30** (~$10) | **~$455** (~$155) | **~$4,540** (~$1,540) |
+| **합계** | **~$0** | **~$8** | **~$60** (커스텀 도메인 시 ~$35) |
+
+> ※ 대규모에서 Workers 비용이 튀는 것은 `/media` 프록시가 세그먼트 요청을 Worker로 받기 때문입니다. **커스텀 도메인을 R2에 연결하면 세그먼트가 Cloudflare 엣지에서 직접 나가 이 비용이 사라집니다** (`MEDIA_BASE_URL` 한 줄 교체, [가이드](docs/r2-custom-domain-setup.md)).
 
 ### 핵심
 
-- **비용의 95% 이상이 Bunny 영상 전송**입니다. Cloudflare·Supabase는 다 합쳐도 월 **$0~$30** 수준.
-- 전송 단가가 지역별로 **3~6배** 차이 → **시청자 지역**이 가장 큰 변수 (유럽·북미 위주면 비용 1/3).
-- **피드 캐시(KV + Cron)** 로 메인 트래픽이 DB를 거의 거치지 않아 Supabase egress/compute가 억제되고, **Cloudflare 무료 티어(월 ~300만 요청)** 가 상당 규모까지 컴퓨트 비용을 사실상 0으로 유지합니다.
-- 비용을 더 낮추려면: 전송량(시청 × 영상 크기)이 지배적이므로 **기본 재생 화질 하향**·**썸네일 프리뷰로 자동재생 억제**가 가장 효과적입니다.
+- **R2 전환으로 전송비가 0** → 이전엔 대규모에서 월 수천 달러(Bunny 전송 $4,500)였던 것이 **월 ~$35~60 수준**으로 떨어집니다. 비용이 시청자 지역과 무관해졌습니다.
+- 남은 변수는 **R2 저장**(영상 누적량에 비례, 저렴)과 **`/media` 프록시의 Worker 요청**(트래픽 비례)뿐입니다. 후자는 커스텀 도메인으로 제거 가능.
+- **피드 캐시(KV + Cron)** 로 메인 트래픽이 DB를 거의 거치지 않아 Supabase 비용을 억제합니다.
+- 전송량 자체를 더 줄이려면: **클릭-투-플레이**(자동재생 억제)·**화질 캡**(`capLevelToPlayerSize`)이 이미 적용돼 있어 R2 요청·저장 모두 최소화됩니다.

@@ -23,10 +23,14 @@ cd apps/web && npx eslint src
 taskkill //F //IM node.exe
 
 # 배포
-cd apps/api && npx wrangler deploy   # Cloudflare Workers 배포
-pnpm build:web                        # Next.js 빌드 (Cloudflare Pages는 CI에서 자동)
+cd apps/api && npx wrangler deploy   # API(Cloudflare Workers) 배포
+# 웹 배포: git push origin master → Workers Builds CI가 자동 빌드·배포
+#   (로컬 `pnpm run deploy`는 Windows에서 .open-next 권한 오류로 실패 — 사용 금지)
 # Workers 환경변수(secrets) 등록 — .dev.vars 추가 후 배포 전 필수
 cd apps/api && npx wrangler secret put <VAR_NAME>
+# 큐 생성: npx -y wrangler@4 queues create <name> --message-retention-period-secs 86400
+#   (로컬 wrangler 3.x는 retention 기본값으로 "invalid settings" 오류)
+# wrangler API 오류 원인 확인: WRANGLER_LOG_SANITIZE=false WRANGLER_LOG=debug npx wrangler ...
 ```
 
 ## 환경변수 설정
@@ -58,6 +62,10 @@ cd apps/api && npx wrangler secret put <VAR_NAME>
 - **댓글/대댓글**: [`src/components/video/CommentSection.tsx`](apps/web/src/components/video/CommentSection.tsx) — 최상위 댓글은 `parent_id=is.null`, 대댓글은 `GET /api/comments/:id/replies`. 대댓글 수는 CommentItem 마운트 시 비동기 조회.
 - **업로드 제한**: 파일 선택 시 클라이언트에서 500MB 크기 체크 + HTML5 video `loadedmetadata`로 3분(180초) 재생시간 체크. `getVideoDuration()` 헬퍼 함수 `UploadForm.tsx` 내 정의.
 
+### R2 HLS 서빙 (영상 전송비 절감)
+
+영상은 Bunny 트랜스코딩 후 [`src/lib/r2-copy.ts`](apps/api/src/lib/r2-copy.ts)가 HLS 파일을 R2로 복사 → `/media/*` 프록시로 egress 무료 서빙. `videos.playback_host`(`bunny`/`r2`)로 영상별 전환·롤백. 신규 업로드는 `r2-copy` 큐 자동 처리, 기존 영상은 `POST /api/videos/backfill-r2`(X-Admin-Key). 설계·운영: [`docs/r2-serving-design.md`](docs/r2-serving-design.md), [`docs/r2-custom-domain-setup.md`](docs/r2-custom-domain-setup.md).
+
 ### `packages/db`
 
 [`schema.sql`](packages/db/schema.sql)을 Supabase SQL 에디터에서 직접 실행. 모든 테이블에 RLS(Row Level Security) 적용됨. `view_count`/`like_count`/`subscriber_count` 증감은 모두 Supabase RPC(stored function)로 처리 (`increment_view_count`, `toggle_like`, `toggle_subscription`). race condition 방지 및 atomic 보장.
@@ -71,10 +79,11 @@ cd apps/api && npx wrangler secret put <VAR_NAME>
 
 | 서비스 | 용도 |
 |--------|------|
-| **Bunny Stream** | 동영상 트랜스코딩 + HLS 전송 (비용: ~$0.005/1,000분 저장, $0.009/GB 전송) |
+| **Bunny Stream** | 동영상 트랜스코딩 + HLS 생성 (전송은 R2로 이전). R2 복사 후 7일 뒤 원본 삭제 |
 | **Bunny Storage Zone** | 썸네일·아바타 이미지 저장 + CDN 서빙 (~$0.01/GB, Supabase egress 대비 9배 저렴). 헬퍼: `apps/api/src/lib/bunny-storage.ts` |
 | **Cloudflare Workers** | API 서버 (서버리스, 엣지 실행) |
-| **Cloudflare Pages** | Next.js 프론트 호스팅 (무료) |
+| **Cloudflare Workers (OpenNext)** | Next.js 프론트 호스팅 — `git push` → Workers Builds CI 자동 배포 (무료) |
+| **Cloudflare R2** | 영상 HLS 최종 저장·서빙 (`newmovie-media`, egress 무료). `/media` 프록시 경유 |
 | **Supabase** | PostgreSQL DB + Auth + RLS |
 | **Supabase Storage** | 구버전 아바타·썸네일 파일 보관 (신규 업로드는 Bunny Storage로 이전됨, bucket `avatars`/`thumbnails` 유지 필요) |
 
@@ -98,8 +107,9 @@ cd apps/api && npx wrangler secret put <VAR_NAME>
 - **Next.js 외부 이미지 도메인**: 새 외부 이미지 도메인 추가 시 `apps/web/next.config.ts`의 `images.remotePatterns`에 등록 필요 (예: Google 프로필 사진 `lh3.googleusercontent.com`).
 - **Bunny Stream 영상 isPublic**: 기본값 `false` — 영상 생성 시 반드시 `isPublic: true` 포함해야 CDN 접근 가능.
 - **Bunny CDN "Block direct url file access"**: Stream 라이브러리 → Security → General에서 기본 활성화됨 → 반드시 비활성화 필요 (활성화 시 썸네일/영상 403).
-- **Cloudflare Pages Image Resizing 과금**: `next/image`가 살아있으면 $0.50/1,000 변환 과금 발생 가능. `next.config.ts`에 `images.unoptimized: true` 설정으로 차단 (이미지는 Bunny CDN에서 직접 서빙).
+- **next/image 변환 과금**: `next/image`가 최적화되면 Cloudflare 이미지 변환 과금 발생 가능. `next.config.ts`에 `images.unoptimized: true` 설정으로 차단 (이미지는 Bunny CDN에서 직접 서빙).
 - **Bunny tus 서명**: `sha256(libraryId + apiKey + expirationTime + videoId)` — Workers에서 `crypto.subtle.digest('SHA-256', ...)` 로 생성.
 - **Bunny Storage Zone 아바타**: 아바타는 `avatars/{userId}/` 폴더에 저장. 신규 업로드 시 이전 파일 자동 삭제. 구버전 Supabase `avatars` bucket 파일은 점진적으로 대체됨 (bucket 유지 필요).
 - **본인 채널 구독 방지**: `POST /api/channels/:id/subscribe`에서 `channel.owner_id === userId` 체크.
 - **Workers에서 File instanceof 불가**: `formData.get('file') as Blob` 으로 처리. `file.type`도 빈 문자열(`''`)로 올 수 있음 → `file.type || 'image/png'` 폴백 필수 (upload.ts, auth.ts 참고).
+- **Cloudflare 무료 플랜 subrequest 한도**: Worker invocation당 외부 요청 50개 제한. 대량 파일 작업(R2 복사 등)은 한 번에 끝내지 말고 분할 + 재개(resumable) 패턴 필요 — R2에 이미 있는 키는 건너뛰고 배치로 나눠 큐 재큐잉 (`r2-copy.ts`의 `FILES_PER_RUN` 참고).

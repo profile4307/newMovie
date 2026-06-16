@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NewMovie — API · 데이터 흐름도</title>
+<style>
+  :root{
+    --bg:#0b1220; --panel:#121a2b; --panel2:#16213a; --line:#26344f;
+    --ink:#e8eef9; --muted:#9fb0cc; --dim:#6b7d9c;
+    --sky:#38bdf8; --grn:#34d399; --amb:#fbbf24; --pur:#a78bfa;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,#0b1220,#0a0f1c 60%);color:var(--ink);
+    font-family:"Segoe UI",-apple-system,"Malgun Gothic",sans-serif;line-height:1.5;padding:32px 20px 80px}
+  .wrap{max-width:1180px;margin:0 auto}
+  h1{font-size:30px;margin:0 0 4px;letter-spacing:-.5px}
+  h1 .b{color:var(--sky)}
+  .sub{color:var(--muted);margin:0 0 6px;font-size:15px}
+  .meta{color:var(--dim);font-size:13px;margin-bottom:28px}
+  .meta code{background:#0e1626;padding:2px 7px;border-radius:5px;color:var(--grn);border:1px solid var(--line)}
+  h2{font-size:19px;margin:38px 0 14px;padding-left:11px;border-left:4px solid var(--sky)}
+  h2 .n{color:var(--dim);font-weight:400;font-size:14px;margin-left:8px}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin:0 0 24px;font-size:12.5px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:11px;height:11px;border-radius:3px;display:inline-block}
+
+  /* component grid */
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .col-h{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--dim);margin:0 0 10px;text-align:center}
+  .stack{display:flex;flex-direction:column;gap:12px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 15px}
+  .card .t{font-weight:700;font-size:14.5px;margin-bottom:3px;display:flex;align-items:center;gap:7px}
+  .card .d{font-size:12.5px;color:var(--muted)}
+  .card .tag{font-size:10.5px;color:var(--dim);margin-top:7px;font-family:ui-monospace,monospace}
+  .b-sky{border-color:#1e4a66}.b-grn{border-color:#1d5544}.b-amb{border-color:#5e4a18}.b-pur{border-color:#3f3470}
+  .ic{width:22px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+
+  /* ── 영상 콘텐츠 저장 경로 (강조 가로 파이프라인) ── */
+  .pipe{background:linear-gradient(90deg,#101a2e,#13233c);border:1px solid var(--line);border-radius:14px;
+    padding:22px;overflow-x:auto}
+  .pipe-row{display:flex;align-items:stretch;gap:0;min-width:max-content}
+  .node{border-radius:12px;padding:13px 16px;min-width:150px;max-width:210px;border:1.5px solid var(--line);background:var(--panel)}
+  .node .stg{font-size:10px;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;font-weight:700}
+  .node .nm{font-weight:700;font-size:14px;margin-bottom:3px}
+  .node .ds{font-size:11.5px;color:var(--muted)}
+  .node.user{border-color:#3a4straight} .node.user{border-color:#39507a}
+  .node.bunny{border-color:#5e4a18;background:#1a1607}
+  .node.r2{border-color:#3f3470;background:#160f2b}
+  .node.viewer{border-color:#1d5544;background:#07150f}
+  .stg.user{color:#8fb4ff}.stg.bunny{color:var(--amb)}.stg.r2{color:var(--pur)}.stg.viewer{color:var(--grn)}
+  .parr{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 4px;min-width:104px}
+  .parr .ln{font-size:20px;color:var(--sky)}
+  .parr .tx{font-size:10.5px;color:var(--muted);text-align:center;font-style:italic;margin-bottom:2px}
+  .pipe-note{display:flex;gap:18px;flex-wrap:wrap;margin-top:16px;font-size:12px;color:var(--muted)}
+  .pipe-note b{color:var(--ink)}
+  .kv{display:inline-flex;align-items:center;gap:6px}
+  .kv i{width:9px;height:9px;border-radius:2px;display:inline-block}
+
+  /* ── 흐름 (가로 스크롤, 단계 한 줄) ── */
+  .flow{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 0 18px 20px;margin-bottom:18px}
+  .flow h3{margin:0 0 14px;font-size:15.5px;display:flex;align-items:center;gap:9px;padding-right:20px}
+  .flow h3 .badge{font-size:11px;padding:2px 9px;border-radius:20px;font-weight:600}
+  .track{display:flex;align-items:stretch;gap:0;overflow-x:auto;padding:2px 20px 8px 0}
+  .step{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 13px;
+    min-width:150px;max-width:215px;flex-shrink:0}
+  .step .who{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim);margin-bottom:2px}
+  .step .what{color:var(--ink);font-weight:600;font-size:12.5px}
+  .step .sm{color:var(--muted);font-size:11.5px;font-weight:400;margin-top:2px}
+  .step.q{border-color:#3f3470}.step.b{border-color:#5e4a18}
+  .arr{display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--dim);padding:0 9px;flex-shrink:0}
+  .arr .ln{font-size:17px}
+  .arr .lbl{font-size:10px;color:var(--dim);font-style:italic;text-align:center;max-width:90px;line-height:1.25}
+  .phase{display:flex;align-items:center;padding:0 11px;flex-shrink:0}
+  .phase span{writing-mode:horizontal-tb;font-size:10.5px;color:var(--sky);background:#0c1f2c;border:1px dashed #1e4a66;
+    border-radius:14px;padding:4px 11px;font-weight:600;white-space:nowrap}
+  .mono{font-family:ui-monospace,monospace}
+
+  table{width:100%;border-collapse:collapse;font-size:13px;background:var(--panel);border-radius:12px;overflow:hidden;border:1px solid var(--line)}
+  th{background:#0e1626;text-align:left;padding:9px 13px;color:var(--sky);font-size:11.5px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--line)}
+  td{padding:8px 13px;border-bottom:1px solid #1a2538;vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  td .m{font-family:ui-monospace,monospace;font-size:12px}
+  .pill{display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:5px;font-family:ui-monospace,monospace}
+  .get{background:#0c3a4d;color:#5fd3f5}.post{background:#0c4030;color:#4ade80}
+  .put{background:#473414;color:#fbbf24}.del{background:#481f24;color:#fb7185}
+  .auth{color:var(--amb);font-size:11px}.pub{color:var(--dim);font-size:11px}
+  .note{background:#101d16;border:1px solid #1d5544;border-radius:10px;padding:13px 16px;font-size:13px;color:#bfe7d4;margin-top:14px}
+  .note b{color:var(--grn)}
+  .hint{font-size:11.5px;color:var(--dim);margin:-6px 0 14px;font-style:italic}
+  .foot{margin-top:40px;color:var(--dim);font-size:12px;text-align:center;border-top:1px solid var(--line);padding-top:18px}
+  .track::-webkit-scrollbar,.pipe::-webkit-scrollbar{height:9px}
+  .track::-webkit-scrollbar-thumb,.pipe::-webkit-scrollbar-thumb{background:#2b3c5c;border-radius:6px}
+  .track::-webkit-scrollbar-track,.pipe::-webkit-scrollbar-track{background:#0e1626;border-radius:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span class="b">NewMovie</span> — API · 데이터 흐름도</h1>
+  <p class="sub">서버리스 동영상 플랫폼 — Cloudflare 엣지 · Supabase · Bunny · R2 HLS 서빙</p>
+  <p class="meta">기준: 2026-06-11 현재 코드 · 라이브 <code>https://new-movie.profile4307.workers.dev</code> · API <code>https://newmovie-api.profile4307.workers.dev</code></p>
+
+  <div class="legend">
+    <span><i class="dot" style="background:var(--sky)"></i>프론트 / 엣지 (Cloudflare)</span>
+    <span><i class="dot" style="background:var(--grn)"></i>데이터 (Supabase)</span>
+    <span><i class="dot" style="background:var(--amb)"></i>미디어 (Bunny)</span>
+    <span><i class="dot" style="background:var(--pur)"></i>저장·서빙 (R2 / KV)</span>
+  </div>
+
+  <!-- ════════ 영상 콘텐츠 저장 경로 ════════ -->
+  <h2>영상 콘텐츠 저장 경로<span class="n">파일이 거쳐 가는 스토리지와 최종 보관처</span></h2>
+  <p class="hint">← 가로로 스크롤하여 전체 단계를 확인하세요</p>
+  <div class="pipe">
+    <div class="pipe-row">
+      <div class="node user">
+        <div class="stg user">① 출처</div>
+        <div class="nm">사용자 기기</div>
+        <div class="ds">원본 영상 파일 (≤500MB · ≤3분)</div>
+      </div>
+      <div class="parr"><div class="tx">tus 직접 업로드<br>(API·서버 미경유)</div><div class="ln">▶</div></div>
+      <div class="node bunny">
+        <div class="stg bunny">② 처리 + 임시 저장</div>
+        <div class="nm">🎬 Bunny Stream</div>
+        <div class="ds">원본 보관 → 트랜스코딩(무료) → <b style="color:var(--amb)">HLS(240p·360p…) 생성</b></div>
+      </div>
+      <div class="parr"><div class="tx">트랜스코딩 완료 후<br>큐가 HLS 복사</div><div class="ln">▶</div></div>
+      <div class="node r2">
+        <div class="stg r2">③ 최종 저장 + 서빙</div>
+        <div class="nm">📦 R2 · newmovie-media</div>
+        <div class="ds">manifest + 세그먼트(.ts) 영구 보관. <b style="color:var(--grn)">egress $0</b> 로 서빙</div>
+      </div>
+      <div class="parr"><div class="tx">hls.js 재생<br>(/media 또는 커스텀 도메인)</div><div class="ln">▶</div></div>
+      <div class="node viewer">
+        <div class="stg viewer">④ 소비</div>
+        <div class="nm">시청자 브라우저</div>
+        <div class="ds">클릭-투-플레이 · 화면 크기에 맞는 화질</div>
+      </div>
+    </div>
+    <div class="pipe-note">
+      <span class="kv"><i style="background:var(--amb)"></i><b>Bunny 원본은 7일 후 삭제</b> — R2 복사·검증 완료 후 Cron이 정리(저장비 중복 해소). 이후 <b>R2가 유일 보관처</b>.</span>
+      <span class="kv"><i style="background:var(--grn)"></i>전환 상태는 <span class="mono">videos.playback_host</span> (<span class="mono">bunny</span>→<span class="mono">r2</span>) 로 영상별 추적 · 롤백 가능.</span>
+      <span class="kv"><i style="background:#5e4a18"></i>썸네일·아바타 이미지는 별도로 <b>Bunny Storage Zone</b> 에 저장·CDN 서빙.</span>
+    </div>
+  </div>
+
+  <!-- ════════ 시스템 구성 ════════ -->
+  <h2>시스템 구성<span class="n">컴포넌트와 역할</span></h2>
+  <div class="grid">
+    <div>
+      <p class="col-h">프론트엔드 / 엣지</p>
+      <div class="stack">
+        <div class="card b-sky"><div class="t"><span class="ic" style="background:#0c3a4d">🖥️</span>Next.js 16 웹</div>
+          <div class="d">App Router · 클라이언트 렌더. <span class="mono">hls.js</span> 동적 import로 HLS 재생.</div>
+          <div class="tag">Cloudflare Workers (OpenNext)</div></div>
+        <div class="card b-sky"><div class="t"><span class="ic" style="background:#0c3a4d">⚡</span>Hono API</div>
+          <div class="d">REST API. 인증 미들웨어 · 라우트 5종 · <span class="mono">/media</span> 프록시.</div>
+          <div class="tag">Cloudflare Workers</div></div>
+        <div class="card b-pur"><div class="t"><span class="ic" style="background:#2c2350">🗂️</span>Workers KV</div>
+          <div class="d">추천·최신 피드 캐시. Cron이 30분마다 미리 생성.</div>
+          <div class="tag">FEED_CACHE</div></div>
+      </div>
+    </div>
+    <div>
+      <p class="col-h">데이터 / 인증</p>
+      <div class="stack">
+        <div class="card b-grn"><div class="t"><span class="ic" style="background:#0c4030">🗄️</span>Supabase Postgres</div>
+          <div class="d">RLS 적용. 카운터·피드·검색은 RPC(stored function)로 원자 처리.</div>
+          <div class="tag">REST · service role / anon</div></div>
+        <div class="card b-grn"><div class="t"><span class="ic" style="background:#0c4030">🔐</span>Supabase Auth</div>
+          <div class="d">이메일 + Google OAuth. 토큰 검증 <span class="mono">/auth/v1/user</span>.</div>
+          <div class="tag">Bearer JWT</div></div>
+      </div>
+    </div>
+    <div>
+      <p class="col-h">미디어 / 저장</p>
+      <div class="stack">
+        <div class="card b-amb"><div class="t"><span class="ic" style="background:#473414">🎬</span>Bunny Stream</div>
+          <div class="d">tus 직접 업로드 · 트랜스코딩(무료) · HLS 생성. 복사 후 7일 뒤 원본 삭제.</div>
+          <div class="tag">video.bunnycdn.com</div></div>
+        <div class="card b-pur"><div class="t"><span class="ic" style="background:#2c2350">📦</span>R2 (newmovie-media)</div>
+          <div class="d">HLS 파일 최종 저장·서빙 — <b style="color:var(--grn)">egress $0</b>. <span class="mono">/media</span> 프록시 경유.</div>
+          <div class="tag">현재: 전송비 0, Worker 요청만 소비</div></div>
+        <div class="card b-amb"><div class="t"><span class="ic" style="background:#473414">🖼️</span>Bunny Storage Zone</div>
+          <div class="d">썸네일 · 아바타 이미지 저장 + CDN 서빙.</div>
+          <div class="tag">~$0.01/GB</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ 데이터 흐름 (가로) ════════ -->
+  <h2>주요 데이터 흐름<span class="n">요청별 경로 · 좌→우 진행</span></h2>
+  <p class="hint">← 각 흐름은 가로로 스크롤하여 전체 단계를 확인하세요</p>
+
+  <div class="flow">
+    <h3><span class="badge" style="background:#473414;color:var(--amb)">인증</span>보호된 요청의 토큰 검증 + 유저 자동 생성</h3>
+    <div class="track">
+      <div class="step"><div class="who">브라우저</div><div class="what">Supabase 세션 토큰</div><div class="sm">api.ts가 <span class="mono">Bearer</span> 자동 첨부</div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step"><div class="who">API · requireAuth</div><div class="what">anon client 토큰 검증</div><div class="sm">Supabase <span class="mono">/auth/v1/user</span></div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step"><div class="who">API</div><div class="what">public.users 확인</div><div class="sm">없으면 자동 생성 (OAuth)</div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step"><div class="who">핸들러</div><div class="what"><span class="mono">c.set('userId')</span></div><div class="sm">이후 로직 진행</div></div>
+    </div>
+  </div>
+
+  <div class="flow">
+    <h3><span class="badge" style="background:#2c2350;color:var(--pur)">피드</span>홈 피드 조회 — KV 캐시 우선, 미스 시 DB</h3>
+    <div class="track">
+      <div class="phase"><span>백그라운드 · Cron 30분</span></div>
+      <div class="step"><div class="who">Cron</div><div class="what">DB RPC로 피드 생성</div><div class="sm"><span class="mono">get_trending_videos</span> / 최신순</div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step q"><div class="who">Workers KV</div><div class="what">feed:trending / latest 저장</div><div class="sm">TTL = 갱신주기 ×2</div></div>
+      <div class="phase"><span>사용자 요청</span></div>
+      <div class="step"><div class="who">브라우저</div><div class="what">GET /api/videos</div><div class="sm">feed·page·category·search</div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step"><div class="who">API</div><div class="what">KV 캐시 슬라이스</div><div class="sm">검색·구독·비인기 카테고리는 DB 폴백</div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step"><div class="who">API · attachChannels</div><div class="what">채널 정보 결합</div><div class="sm">아바타 폴백</div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step"><div class="who">브라우저</div><div class="what">카드 목록 렌더</div></div>
+    </div>
+  </div>
+
+  <div class="flow">
+    <h3><span class="badge" style="background:#473414;color:var(--amb)">업로드 → 저장</span>업로드 · 트랜스코딩 · R2 전환 (영상 전 생애)</h3>
+    <div class="track">
+      <div class="phase"><span>업로드</span></div>
+      <div class="step"><div class="who">브라우저</div><div class="what">POST /upload/stream-url</div><div class="sm">Bunny 비디오 생성 + tus 서명</div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step b"><div class="who">브라우저 → Bunny</div><div class="what">tus 직접 업로드</div><div class="sm">파일이 API 미경유</div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step"><div class="who">브라우저</div><div class="what">POST /api/videos</div><div class="sm">메타데이터 · status=processing</div></div>
+      <div class="phase"><span>트랜스코딩 완료 후</span></div>
+      <div class="step b"><div class="who">Bunny → API</div><div class="what">webhook / 폴링</div><div class="sm"><span class="mono">/webhook</span> · <span class="mono">/stream-status</span></div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step"><div class="who">API · finalize</div><div class="what">status → 공개상태</div><div class="sm">1회만 (processing 가드)</div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step q"><div class="who">API → 큐</div><div class="what">r2-copy 큐잉</div><div class="sm">enqueueR2Copy</div></div>
+      <div class="phase"><span>큐 컨슈머</span></div>
+      <div class="step q"><div class="who">큐 컨슈머</div><div class="what">Bunny HLS → R2 복사</div><div class="sm">manifest+세그먼트, 재개 가능 분할</div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step"><div class="who">API → DB</div><div class="what">playback_host = 'r2'</div><div class="sm">r2_copied_at 기록</div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step b"><div class="who">Cron · 7일 후</div><div class="what">Bunny 원본 purge</div><div class="sm">R2가 유일 보관처 · 롤백 창 종료</div></div>
+    </div>
+  </div>
+
+  <div class="flow">
+    <h3><span class="badge" style="background:#0c4030;color:var(--grn)">재생</span>영상 시청 — R2에서 HLS 서빙 (전송비 0)</h3>
+    <div class="track">
+      <div class="step"><div class="who">브라우저</div><div class="what">GET /api/videos/:id</div><div class="sm">상세 + <span class="mono">playback_url</span> 조립</div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step"><div class="who">VideoPlayer</div><div class="what">클릭-투-플레이</div><div class="sm">재생 전 0 byte · 썸네일만</div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step q"><div class="who">hls.js → /media</div><div class="what">manifest + 세그먼트</div><div class="sm">capLevelToPlayerSize · 버퍼 15s</div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step q"><div class="who">API → R2</div><div class="what">파일 스트리밍</div><div class="sm">CORS · immutable 캐시 · Range 206 · egress $0</div></div>
+      <div class="phase"><span>별도 · 하루 1회</span></div>
+      <div class="step"><div class="who">브라우저</div><div class="what">POST /:id/view</div><div class="sm"><span class="mono">localStorage</span> 중복 차단</div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step"><div class="who">API · waitUntil</div><div class="what">increment_view_count</div><div class="sm">DB write 절감</div></div>
+    </div>
+  </div>
+
+  <div class="flow">
+    <h3><span class="badge" style="background:#473414;color:var(--amb)">이미지</span>썸네일 · 아바타 — Bunny Storage Zone</h3>
+    <div class="track">
+      <div class="step"><div class="who">브라우저</div><div class="what">POST /upload/thumbnail · /auth/avatar</div><div class="sm">multipart 파일</div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step b"><div class="who">API</div><div class="what">Bunny Storage PUT</div><div class="sm">아바타는 이전 파일 자동 삭제</div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step"><div class="who">API → DB</div><div class="what">URL 저장</div><div class="sm">아바타는 Auth user_metadata도 갱신</div></div>
+      <div class="arr"><div class="ln">▶</div></div>
+      <div class="step b"><div class="who">Storage CDN</div><div class="what">이미지 서빙</div></div>
+    </div>
+  </div>
+
+  <!-- ════════ API 라우트 표 ════════ -->
+  <h2>API 라우트 전체<span class="n">apps/api/src/index.ts 등록 순</span></h2>
+  <table>
+    <thead><tr><th style="width:90px">메서드</th><th style="width:300px">경로</th><th>설명</th><th style="width:90px">인증</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pill get">GET</span></td><td class="m">/</td><td>헬스체크</td><td class="pub">공개</td></tr>
+      <tr><td><span class="pill get">GET</span></td><td class="m">/media/*</td><td>R2 HLS 파일 프록시 (CORS · 캐시 · Range)</td><td class="pub">공개</td></tr>
+      <tr><td colspan="4" style="background:#0e1626;color:var(--sky);font-size:11px;letter-spacing:.5px">/api/auth</td></tr>
+      <tr><td><span class="pill get">GET</span></td><td class="m">/api/auth/me</td><td>현재 유저 프로필</td><td class="auth">필요</td></tr>
+      <tr><td><span class="pill post">POST</span></td><td class="m">/api/auth/profile</td><td>프로필 초기화/수정 (username)</td><td class="auth">필요</td></tr>
+      <tr><td><span class="pill post">POST</span></td><td class="m">/api/auth/avatar</td><td>프로필 사진 업로드 → Bunny Storage</td><td class="auth">필요</td></tr>
+      <tr><td colspan="4" style="background:#0e1626;color:var(--sky);font-size:11px;letter-spacing:.5px">/api/videos</td></tr>
+      <tr><td><span class="pill get">GET</span></td><td class="m">/api/videos</td><td>피드 (trending/latest/subscriptions/search)</td><td class="pub">공개*</td></tr>
+      <tr><td><span class="pill get">GET</span></td><td class="m">/api/videos/subscription-by-channel</td><td>구독 채널별 그룹 피드</td><td class="auth">필요</td></tr>
+      <tr><td><span class="pill get">GET</span></td><td class="m">/api/videos/mine</td><td>내 영상 (processing 포함)</td><td class="auth">필요</td></tr>
+      <tr><td><span class="pill post">POST</span></td><td class="m">/api/videos/backfill-r2</td><td>기존 영상 R2 일괄 전환 (관리자)</td><td class="auth">X-Admin-Key</td></tr>
+      <tr><td><span class="pill get">GET</span></td><td class="m">/api/videos/:id</td><td>상세 + <span class="m">playback_url</span> 조립</td><td class="pub">공개**</td></tr>
+      <tr><td><span class="pill get">GET</span></td><td class="m">/api/videos/:id/related</td><td>유사 영상 추천 (태그 FTS)</td><td class="pub">공개</td></tr>
+      <tr><td><span class="pill post">POST</span></td><td class="m">/api/videos/:id/view</td><td>조회수 증가 (waitUntil)</td><td class="pub">공개</td></tr>
+      <tr><td><span class="pill post">POST</span></td><td class="m">/api/videos</td><td>영상 메타데이터 등록</td><td class="auth">필요</td></tr>
+      <tr><td><span class="pill put">PUT</span></td><td class="m">/api/videos/:id</td><td>영상 수정 (소유자)</td><td class="auth">필요</td></tr>
+      <tr><td><span class="pill del">DEL</span></td><td class="m">/api/videos/:id</td><td>삭제 → Bunny·R2·썸네일 정리</td><td class="auth">필요</td></tr>
+      <tr><td><span class="pill post">POST</span></td><td class="m">/api/videos/:id/like</td><td>좋아요 토글 (RPC)</td><td class="auth">필요</td></tr>
+      <tr><td colspan="4" style="background:#0e1626;color:var(--sky);font-size:11px;letter-spacing:.5px">/api/channels</td></tr>
+      <tr><td><span class="pill get">GET</span></td><td class="m">/api/channels/mine</td><td>내 채널</td><td class="auth">필요</td></tr>
+      <tr><td><span class="pill get">GET</span></td><td class="m">/api/channels/:id</td><td>채널 조회</td><td class="pub">공개</td></tr>
+      <tr><td><span class="pill get">GET</span></td><td class="m">/api/channels/:id/videos</td><td>채널 영상 목록</td><td class="pub">공개</td></tr>
+      <tr><td><span class="pill post">POST</span></td><td class="m">/api/channels</td><td>채널 생성 (1인 1채널)</td><td class="auth">필요</td></tr>
+      <tr><td><span class="pill post">POST</span></td><td class="m">/api/channels/:id/subscribe</td><td>구독 토글 (본인 채널 차단)</td><td class="auth">필요</td></tr>
+      <tr><td colspan="4" style="background:#0e1626;color:var(--sky);font-size:11px;letter-spacing:.5px">/api/upload</td></tr>
+      <tr><td><span class="pill post">POST</span></td><td class="m">/api/upload/stream-url</td><td>Bunny 비디오 생성 + tus 서명</td><td class="auth">필요</td></tr>
+      <tr><td><span class="pill post">POST</span></td><td class="m">/api/upload/thumbnail</td><td>썸네일 업로드 → Bunny Storage</td><td class="auth">필요</td></tr>
+      <tr><td><span class="pill get">GET</span></td><td class="m">/api/upload/stream-status/:uid</td><td>트랜스코딩 상태 + 완료 시 finalize</td><td class="auth">필요</td></tr>
+      <tr><td><span class="pill post">POST</span></td><td class="m">/api/upload/webhook</td><td>Bunny 완료 웹훅 → finalize</td><td class="auth">시크릿</td></tr>
+      <tr><td colspan="4" style="background:#0e1626;color:var(--sky);font-size:11px;letter-spacing:.5px">/api/comments</td></tr>
+      <tr><td><span class="pill get">GET</span></td><td class="m">/api/comments</td><td>최상위 댓글 목록 (video_id)</td><td class="pub">공개</td></tr>
+      <tr><td><span class="pill post">POST</span></td><td class="m">/api/comments</td><td>댓글/대댓글 작성</td><td class="auth">필요</td></tr>
+      <tr><td><span class="pill get">GET</span></td><td class="m">/api/comments/:id/replies</td><td>대댓글 목록</td><td class="pub">공개</td></tr>
+      <tr><td><span class="pill del">DEL</span></td><td class="m">/api/comments/:id</td><td>댓글 삭제 (소유자)</td><td class="auth">필요</td></tr>
+      <tr><td colspan="4" style="background:#0e1626;color:var(--pur);font-size:11px;letter-spacing:.5px">백그라운드 (HTTP 외)</td></tr>
+      <tr><td><span class="pill put">CRON</span></td><td class="m">*/30 * * * *</td><td>피드 캐시 갱신 + R2 전환분 Bunny 원본 purge</td><td class="pub">—</td></tr>
+      <tr><td><span class="pill post">QUEUE</span></td><td class="m">r2-copy</td><td>Bunny HLS → R2 복사 (실패 시 재시도·분할 재개)</td><td class="pub">—</td></tr>
+    </tbody>
+  </table>
+  <div class="note">
+    <b>*</b> 구독 피드와 검색은 같은 엔드포인트(<span class="mono">GET /api/videos</span>)에서 분기 — 구독은 인증 필요.
+    &nbsp;<b>**</b> 비공개/일부공개/처리중 영상은 소유자만 조회 가능 (선택적 토큰 검증).
+    <br><b>현재 재생 경로:</b> <span class="mono">playback_url = https://newmovie-api.profile4307.workers.dev/media/{uid}/playlist.m3u8</span> — R2 직접 서빙(egress $0)이되 세그먼트 요청이 Worker 요청 한도를 소비. 차후 커스텀 도메인 연결 시 <span class="mono">MEDIA_BASE_URL</span> 한 줄 교체로 엣지 직접 서빙 전환 (<span class="mono">docs/r2-custom-domain-setup.md</span>).
+  </div>
+
+  <div class="foot">
+    NewMovie 아키텍처 흐름도 · 코드 기준 (2026-06-11) · 관련 문서:
+    <span class="mono">docs/r2-serving-design.md</span> · <span class="mono">docs/r2-custom-domain-setup.md</span>
+  </div>
+</div>
+</body>
+</html>
